@@ -17,7 +17,6 @@ PETK GUI (Pore Explorer Toolkit Graphical User Interface) is a comprehensive too
 - **Pore Geometry Design**: Support for cylindrical and double-cone nanopore geometries
 - **Parameter Configuration**: Set up simulation parameters including voltages, conductivities, and grid resolution
 - **Python Environment Management**: Integrated conda environment setup for FEniCS calculations
-- **Box Dimension Calculation**: Auto-calculate or manually specify simulation box dimensions
 - **Preview Generation**: Generate visualization previews of molecular movement through nanopores
 - **Full SEM Simulation**: Run complete SEM calculations with current blockage analysis
 
@@ -98,7 +97,6 @@ The application can automatically create a conda environment with these packages
 
 2. **Configure Input Files**
    - Load centered analyte PDB (can sync from Tab 1)
-   - Set up Python environment
 
 3. **Set Simulation Parameters**
    - Define applied voltage and conductivities
@@ -113,7 +111,6 @@ The application can automatically create a conda environment with these packages
 5. **Run Calculations**
    - Generate preview frames for visualization
    - Run full SEM simulation
-   - Analyze current blockage results
   
 ## Python SEM Module
 
@@ -138,10 +135,10 @@ python vertical_movement_sem.py config.json preview_only
 
 ### Input Files
 - **PDB Files**: Protein Data Bank format for molecular structures
-- **JSON Config**: Configuration files for SEM calculations
 
 ### Output Files
 - **Centered PDB**: Molecule centered at origin with surface alignment
+- **JSON Config**: Configuration files for SEM calculation
 - **Analysis Reports**: Detailed text reports of molecular analysis
 - **SEM Results**: Current vs. position data from SEM calculations
 - **Preview Images**: Visualization of molecular movement through nanopores
@@ -170,10 +167,6 @@ python vertical_movement_sem.py config.json preview_only
 - Use auto-calculated box dimensions
 - Consider reducing number of simulation steps
 
-### Getting Help
-- Use the validation tools in Tab 2 to check parameter compatibility
-- Review console output for detailed error messages
-- Check that all required files are in the correct locations
 
 ## Configuration Examples
 
@@ -183,7 +176,7 @@ python vertical_movement_sem.py config.json preview_only
   "pore_geometry": {
     "pore_type": "cylindrical",
     "pore_radius": 100.0,
-    "corner_radius": 10.0,
+    "corner_radius":50.0,
     "membrane_thickness": 200.0
   }
 }
@@ -207,7 +200,7 @@ python vertical_movement_sem.py config.json preview_only
 - All distances in Angstroms (Å)
 - Voltages in millivolts (mV)
 - Conductivities in Siemens per meter (S/m)
-- Currents in Amperes (A)
+- Currents in Amperes (nA)
 
 ### Algorithms
 - **Centering**: Uses center of mass with surface normal alignment
@@ -217,7 +210,7 @@ python vertical_movement_sem.py config.json preview_only
 
 ## Citation
 
-If you use PETK GUI in your research, please cite:
+If you use PETK GUI in your research, please cite the original paper:
 ```
 @article{wilson2019rapid, title={Rapid and accurate determination of nanopore ionic current using a steric exclusion model},
 author={Wilson, James and Sarthak, Kumar and Si, Wei and Gao, Luyu and Aksimentiev, Aleksei},
@@ -236,7 +229,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Version History
 
-### Current Version
+### Current Version 0.0.0
 - Initial release with molecular analysis and SEM calculation capabilities assuming vertical passage of analyte through solid-state nanopore
 - Support for cylindrical and double-cone pore geometries
 - Integrated Python environment management
