@@ -86,7 +86,6 @@ The application can automatically create a conda environment with these packages
 - **Automatic Centering**: Centers molecules at origin with optimal surface alignment
 - **Fit Analysis**: Determines if molecules can pass through specified nanopores
 - **Quality Scoring**: Provides detailed verification of centering accuracy
-- **Export Options**: Save centered PDB files and analysis reports
 
 ### Tab 2: SEM Calculation Setup
 
