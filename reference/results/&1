@@ -1,0 +1,686 @@
+/opt/anaconda3/envs/petk-sem/lib/python3.9/site-packages/ufl/__init__.py:250: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+2025-07-03 19:28:23,161 __main__: INFO: Loaded configuration from config.json
+2025-07-03 19:28:23,161 __main__: INFO: Configuration Summary:
+2025-07-03 19:28:23,161 __main__: INFO:   Input PDB: ../centered_nucleosome.pdb
+2025-07-03 19:28:23,161 __main__: INFO:   Pore Type: Cylindrical
+2025-07-03 19:28:23,161 __main__: INFO:   Pore Radius: 100.0 Å
+2025-07-03 19:28:23,161 __main__: INFO:   Corner Radius: 50.0 Å
+2025-07-03 19:28:23,161 __main__: INFO:   Membrane Thickness: 200.0 Å
+2025-07-03 19:28:23,161 __main__: INFO:   Voltage: 100.0 mV
+2025-07-03 19:28:23,161 __main__: INFO:   Bulk Conductivity: 1.05 S/m
+2025-07-03 19:28:23,161 __main__: INFO:   Use VdW Radii: True
+2025-07-03 19:28:23,161 __main__: INFO:   Z Range: 150.0 to -150.0 Å
+2025-07-03 19:28:23,161 __main__: INFO:   Z Step: 10.0 Å
+2025-07-03 19:28:23,161 __main__: INFO:   Output Prefix: vertical_movement
+2025-07-03 19:28:23,161 __main__: INFO:   Preview Frames: 5
+2025-07-03 19:28:23,161 __main__: INFO: Creating SEM instance from configuration...
+2025-07-03 19:28:23,161 __main__: INFO: Using box dimensions from configuration
+2025-07-03 19:28:23,161 __main__: INFO: Loading analyte structure...
+/opt/anaconda3/envs/petk-sem/lib/python3.9/site-packages/MDAnalysis/topology/PDBParser.py:348: UserWarning: Unknown element  found for some atoms. These have been given an empty element record. If needed they can be guessed using MDAnalysis.topology.guessers.
+  warnings.warn(wmsg)
+/opt/anaconda3/envs/petk-sem/lib/python3.9/site-packages/MDAnalysis/topology/guessers.py:146: UserWarning: Failed to guess the mass for the following atom types: 
+  warnings.warn("Failed to guess the mass for the following atom types: {}".format(atom_type))
+2025-07-03 19:28:23,286 __main__: INFO: Assigning van der Waals radii to atoms...
+2025-07-03 19:28:23,373 __main__: INFO: Van der Waals radii assignment statistics:
+2025-07-03 19:28:23,373 __main__: INFO:   C: 6803 atoms, radius = 1.70 Å
+2025-07-03 19:28:23,373 __main__: INFO:   H: 9952 atoms, radius = 1.20 Å
+2025-07-03 19:28:23,373 __main__: INFO:   N: 2293 atoms, radius = 1.55 Å
+2025-07-03 19:28:23,373 __main__: INFO:   O: 3135 atoms, radius = 1.52 Å
+2025-07-03 19:28:23,373 __main__: INFO:   P: 292 atoms, radius = 1.80 Å
+2025-07-03 19:28:23,373 __main__: INFO:   S: 12 atoms, radius = 1.80 Å
+2025-07-03 19:28:23,373 __main__: INFO: Creating base conductivity grid for cylindrical pore...
+2025-07-03 19:28:23,442 __main__: INFO: Cylindrical pore - radius: 100.0 Å, corner radius: 50.0 Å
+2025-07-03 19:28:23,444 __main__: INFO: Created base conductivity grid with shape (150, 150, 150)
+2025-07-03 19:28:23,444 __main__: INFO: Membrane thickness: 200.0 Å (200.0 Å)
+2025-07-03 19:28:23,445 __main__: INFO: Membrane occupies 1231877/3375000 grid points (36.5%)
+2025-07-03 19:28:23,446 __main__: INFO: Creating FEniCS mesh...
+2025-07-03 19:28:24,214 __main__: INFO: Created mesh with 150x150x150 elements
+2025-07-03 19:28:54,431 __main__: INFO: FEniCS setup complete
+2025-07-03 19:28:54,431 __main__: INFO: SEM instance created successfully
+2025-07-03 19:28:54,431 __main__: INFO: Running full simulation
+2025-07-03 19:28:54,431 __main__: INFO: Calculating open pore current...
+2025-07-03 19:28:55,966 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:28:55,966 FFC: INFO: Compiling form ffc_form_97467c7e404596965deaaa9c597eb72a65340297
+
+2025-07-03 19:28:55,966 FFC: INFO: Compiler stage 1: Analyzing form(s)
+2025-07-03 19:28:55,966 FFC: INFO: -----------------------------------
+2025-07-03 19:28:55,966 FFC: DEBUG:   Preprocessing form using 'uflacs' representation family.
+2025-07-03 19:28:55,985 FFC: INFO:   
+2025-07-03 19:28:55,985 FFC: INFO:   Geometric dimension:       3
+  Number of cell subdomains: 0
+  Rank:                      2
+  Arguments:                 '(v_0, v_1)'
+  Number of coefficients:    1
+  Coefficients:              '[f_13]'
+  Unique elements:           'CG1(?,?), Vector<3 x CG1(?,?)>'
+  Unique sub elements:       'CG1(?,?), Vector<3 x CG1(?,?)>'
+  
+2025-07-03 19:28:55,985 FFC: INFO:   representation:    auto --> uflacs
+2025-07-03 19:28:55,985 FFC: INFO:   quadrature_rule:   auto --> default
+2025-07-03 19:28:55,985 FFC: INFO:   quadrature_degree: auto --> 1
+2025-07-03 19:28:55,985 FFC: INFO:   quadrature_degree: 1
+2025-07-03 19:28:55,985 FFC: INFO:   
+2025-07-03 19:28:55,985 FFC: INFO: Compiler stage 1 finished in 0.0190091 seconds.
+
+2025-07-03 19:28:55,985 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:28:55,985 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:28:55,985 FFC: INFO:   Computing representation of 0 elements
+2025-07-03 19:28:55,985 FFC: INFO:   Computing representation of 0 dofmaps
+2025-07-03 19:28:55,986 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:28:55,986 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:28:55,986 FFC: INFO:   Computing uflacs representation
+2025-07-03 19:28:56,056 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,056 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,056 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,056 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,056 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,066 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,066 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,066 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,067 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,067 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,067 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,068 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,068 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,068 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,068 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,069 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,069 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,069 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,080 UFL: DEBUG: Blocks of each mode: 
+
+2025-07-03 19:28:56,080 FFC: INFO:   Computing representation of forms
+2025-07-03 19:28:56,080 FFC: INFO:   
+2025-07-03 19:28:56,080 FFC: INFO: Compiler stage 2 finished in 0.0944638 seconds.
+
+2025-07-03 19:28:56,080 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:28:56,080 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:28:56,080 FFC: INFO:   Optimizing uflacs representation
+2025-07-03 19:28:56,080 FFC: INFO:   
+2025-07-03 19:28:56,080 FFC: INFO: Compiler stage 3 finished in 8.01086e-05 seconds.
+
+2025-07-03 19:28:56,080 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:28:56,080 FFC: INFO: ---------------------------------
+2025-07-03 19:28:56,080 FFC: INFO:   Generating code for 0 finite_element(s)
+2025-07-03 19:28:56,080 FFC: INFO:   Generating code for 0 dofmap(s)
+2025-07-03 19:28:56,080 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:28:56,080 FFC: INFO:   Generating code for integrals
+2025-07-03 19:28:56,080 FFC: INFO:   Generating code from ffc.uflacs representation
+2025-07-03 19:28:56,086 FFC: INFO:   Generating code for forms
+2025-07-03 19:28:56,087 FFC: INFO:   
+2025-07-03 19:28:56,087 FFC: INFO: Compiler stage 4 finished in 0.00691891 seconds.
+
+2025-07-03 19:28:56,087 FFC: INFO: Compiler stage 4.1 finished in 7.15256e-06 seconds.
+
+2025-07-03 19:28:56,087 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:28:56,087 FFC: INFO: ---------------------------------
+2025-07-03 19:28:56,087 FFC: INFO:   
+2025-07-03 19:28:56,087 FFC: INFO: Compiler stage 5 finished in 0.000164747 seconds.
+
+2025-07-03 19:28:56,087 FFC: INFO: FFC finished in 0.120772 seconds.
+2025-07-03 19:28:56,087 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:28:56,087 FFC: INFO: Compiling element ffc_element_45dd12ff837e70dbbfebd299dc789de582b454f1
+
+2025-07-03 19:28:56,087 FFC: INFO: Compiler stage 1: Analyzing element(s)
+2025-07-03 19:28:56,087 FFC: INFO: --------------------------------------
+2025-07-03 19:28:56,087 FFC: INFO:   
+2025-07-03 19:28:56,087 FFC: INFO: Compiler stage 1 finished in 6.91414e-05 seconds.
+
+2025-07-03 19:28:56,087 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:28:56,087 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:28:56,088 FFC: INFO:   Computing representation of 1 elements
+2025-07-03 19:28:56,088 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,088 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,088 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,088 FFC: INFO:   Computing representation of 1 dofmaps
+2025-07-03 19:28:56,088 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:56,088 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:28:56,088 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:28:56,088 FFC: INFO:   Computing representation of forms
+2025-07-03 19:28:56,088 FFC: INFO:   
+2025-07-03 19:28:56,088 FFC: INFO: Compiler stage 2 finished in 0.000647068 seconds.
+
+2025-07-03 19:28:56,088 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:28:56,088 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:28:56,088 FFC: INFO:   Skipping optimizations, add -O or attach {'optimize': True} metadata to integrals
+2025-07-03 19:28:56,088 FFC: INFO:   
+2025-07-03 19:28:56,088 FFC: INFO: Compiler stage 3 finished in 6.8903e-05 seconds.
+
+2025-07-03 19:28:56,088 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:28:56,088 FFC: INFO: ---------------------------------
+2025-07-03 19:28:56,088 FFC: INFO:   Generating code for 1 finite_element(s)
+2025-07-03 19:28:56,098 FFC: INFO:   Generating code for 1 dofmap(s)
+2025-07-03 19:28:56,099 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:28:56,099 FFC: INFO:   Generating code for integrals
+2025-07-03 19:28:56,099 FFC: INFO:   Generating code for forms
+2025-07-03 19:28:56,099 FFC: INFO:   
+2025-07-03 19:28:56,099 FFC: INFO: Compiler stage 4 finished in 0.010814 seconds.
+
+2025-07-03 19:28:56,099 FFC: INFO: Compiler stage 4.1 finished in 9.53674e-07 seconds.
+
+2025-07-03 19:28:56,099 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:28:56,099 FFC: INFO: ---------------------------------
+2025-07-03 19:28:56,099 FFC: INFO:   
+2025-07-03 19:28:56,099 FFC: INFO: Compiler stage 5 finished in 0.000168085 seconds.
+
+2025-07-03 19:28:56,099 FFC: INFO: FFC finished in 0.0118799 seconds.
+2025-07-03 19:28:57,700 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:28:57,700 FFC: INFO: Compiling element ffc_element_6cf40f1e7282eec93895398fdeaaf09da9956fbb
+
+2025-07-03 19:28:57,700 FFC: INFO: Compiler stage 1: Analyzing element(s)
+2025-07-03 19:28:57,700 FFC: INFO: --------------------------------------
+2025-07-03 19:28:57,700 FFC: INFO:   
+2025-07-03 19:28:57,700 FFC: INFO: Compiler stage 1 finished in 0.000117064 seconds.
+
+2025-07-03 19:28:57,700 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:28:57,700 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:28:57,700 FFC: INFO:   Computing representation of 1 elements
+2025-07-03 19:28:57,700 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:57,701 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:57,701 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:57,701 FFC: INFO:   Computing representation of 1 dofmaps
+2025-07-03 19:28:57,702 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:57,702 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:28:57,702 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:28:57,702 FFC: INFO:   Computing representation of forms
+2025-07-03 19:28:57,702 FFC: INFO:   
+2025-07-03 19:28:57,702 FFC: INFO: Compiler stage 2 finished in 0.00145006 seconds.
+
+2025-07-03 19:28:57,702 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:28:57,702 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:28:57,702 FFC: INFO:   Skipping optimizations, add -O or attach {'optimize': True} metadata to integrals
+2025-07-03 19:28:57,702 FFC: INFO:   
+2025-07-03 19:28:57,702 FFC: INFO: Compiler stage 3 finished in 6.38962e-05 seconds.
+
+2025-07-03 19:28:57,702 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:28:57,702 FFC: INFO: ---------------------------------
+2025-07-03 19:28:57,702 FFC: INFO:   Generating code for 1 finite_element(s)
+2025-07-03 19:28:57,730 FFC: INFO:   Generating code for 1 dofmap(s)
+2025-07-03 19:28:57,731 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:28:57,731 FFC: INFO:   Generating code for integrals
+2025-07-03 19:28:57,731 FFC: INFO:   Generating code for forms
+2025-07-03 19:28:57,731 FFC: INFO:   
+2025-07-03 19:28:57,731 FFC: INFO: Compiler stage 4 finished in 0.0290868 seconds.
+
+2025-07-03 19:28:57,731 FFC: INFO: Compiler stage 4.1 finished in 7.15256e-06 seconds.
+
+2025-07-03 19:28:57,731 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:28:57,731 FFC: INFO: ---------------------------------
+2025-07-03 19:28:57,731 FFC: INFO:   
+2025-07-03 19:28:57,731 FFC: INFO: Compiler stage 5 finished in 0.000225067 seconds.
+
+2025-07-03 19:28:57,731 FFC: INFO: FFC finished in 0.0310531 seconds.
+2025-07-03 19:28:58,874 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:28:58,874 FFC: INFO: Compiling coordinate_mapping ffc_coordinate_mapping_665dccf82e9db28c2f635c05c9ebd53c792b5ba0
+
+2025-07-03 19:28:58,874 FFC: INFO: Compiler stage 1: Analyzing coordinate_mapping(s)
+2025-07-03 19:28:58,874 FFC: INFO: -------------------------------------------------
+2025-07-03 19:28:58,874 FFC: INFO:   
+2025-07-03 19:28:58,875 FFC: INFO: Compiler stage 1 finished in 0.000174046 seconds.
+
+2025-07-03 19:28:58,875 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:28:58,875 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:28:58,875 FFC: INFO:   Computing representation of 0 elements
+2025-07-03 19:28:58,875 FFC: INFO:   Computing representation of 0 dofmaps
+2025-07-03 19:28:58,875 FFC: INFO:   Computing representation of 1 coordinate mappings
+2025-07-03 19:28:58,875 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:28:58,875 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:28:58,876 FFC: INFO:   Computing representation of forms
+2025-07-03 19:28:58,876 FFC: INFO:   
+2025-07-03 19:28:58,876 FFC: INFO: Compiler stage 2 finished in 0.000995159 seconds.
+
+2025-07-03 19:28:58,876 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:28:58,876 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:28:58,876 FFC: INFO:   Skipping optimizations, add -O or attach {'optimize': True} metadata to integrals
+2025-07-03 19:28:58,876 FFC: INFO:   
+2025-07-03 19:28:58,876 FFC: INFO: Compiler stage 3 finished in 9.17912e-05 seconds.
+
+2025-07-03 19:28:58,876 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:28:58,876 FFC: INFO: ---------------------------------
+2025-07-03 19:28:58,876 FFC: INFO:   Generating code for 0 finite_element(s)
+2025-07-03 19:28:58,876 FFC: INFO:   Generating code for 0 dofmap(s)
+2025-07-03 19:28:58,876 FFC: INFO:   Generating code for 1 coordinate_mapping(s)
+2025-07-03 19:28:58,880 FFC: INFO:   Generating code for integrals
+2025-07-03 19:28:58,880 FFC: INFO:   Generating code for forms
+2025-07-03 19:28:58,880 FFC: INFO:   
+2025-07-03 19:28:58,880 FFC: INFO: Compiler stage 4 finished in 0.00400686 seconds.
+
+2025-07-03 19:28:58,880 FFC: INFO: Compiler stage 4.1 finished in 5.96046e-06 seconds.
+
+2025-07-03 19:28:58,880 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:28:58,880 FFC: INFO: ---------------------------------
+2025-07-03 19:28:58,880 FFC: INFO:   
+2025-07-03 19:28:58,880 FFC: INFO: Compiler stage 5 finished in 0.000174999 seconds.
+
+2025-07-03 19:28:58,880 FFC: INFO: FFC finished in 0.00558519 seconds.
+2025-07-03 19:29:00,329 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:29:00,329 FFC: INFO: Compiling form ffc_form_703a3b53482979c2e2a2189c16c99dae527f2209
+
+2025-07-03 19:29:00,329 FFC: INFO: Compiler stage 1: Analyzing form(s)
+2025-07-03 19:29:00,329 FFC: INFO: -----------------------------------
+2025-07-03 19:29:00,329 FFC: DEBUG:   Preprocessing form using 'uflacs' representation family.
+2025-07-03 19:29:00,333 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:00,333 FFC: INFO:   
+2025-07-03 19:29:00,334 FFC: INFO:   Geometric dimension:       3
+  Number of cell subdomains: 0
+  Rank:                      1
+  Arguments:                 '(v_0)'
+  Number of coefficients:    1
+  Coefficients:              '[f_19]'
+  Unique elements:           'CG1(?,?), R0(?,?), Vector<3 x CG1(?,?)>'
+  Unique sub elements:       'CG1(?,?), R0(?,?), Vector<3 x CG1(?,?)>'
+  
+2025-07-03 19:29:00,334 FFC: INFO:   representation:    auto --> uflacs
+2025-07-03 19:29:00,334 FFC: INFO:   quadrature_rule:   auto --> default
+2025-07-03 19:29:00,334 FFC: INFO:   quadrature_degree: auto --> 1
+2025-07-03 19:29:00,334 FFC: INFO:   quadrature_degree: 1
+2025-07-03 19:29:00,334 FFC: INFO:   
+2025-07-03 19:29:00,334 FFC: INFO: Compiler stage 1 finished in 0.00496888 seconds.
+
+2025-07-03 19:29:00,334 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:29:00,334 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:29:00,334 FFC: INFO:   Computing representation of 0 elements
+2025-07-03 19:29:00,334 FFC: INFO:   Computing representation of 0 dofmaps
+2025-07-03 19:29:00,334 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:29:00,334 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:29:00,334 FFC: INFO:   Computing uflacs representation
+2025-07-03 19:29:00,334 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,335 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,335 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,335 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,335 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,338 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,338 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,338 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,339 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,339 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,339 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,340 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,340 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,340 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,341 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,341 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,341 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,341 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,342 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,347 UFL: DEBUG: Blocks of each mode: 
+
+2025-07-03 19:29:00,347 FFC: INFO:   Computing representation of forms
+2025-07-03 19:29:00,347 FFC: INFO:   
+2025-07-03 19:29:00,347 FFC: INFO: Compiler stage 2 finished in 0.0133398 seconds.
+
+2025-07-03 19:29:00,347 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:29:00,347 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:29:00,347 FFC: INFO:   Optimizing uflacs representation
+2025-07-03 19:29:00,347 FFC: INFO:   
+2025-07-03 19:29:00,347 FFC: INFO: Compiler stage 3 finished in 8.2016e-05 seconds.
+
+2025-07-03 19:29:00,347 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:29:00,347 FFC: INFO: ---------------------------------
+2025-07-03 19:29:00,347 FFC: INFO:   Generating code for 0 finite_element(s)
+2025-07-03 19:29:00,347 FFC: INFO:   Generating code for 0 dofmap(s)
+2025-07-03 19:29:00,347 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:29:00,347 FFC: INFO:   Generating code for integrals
+2025-07-03 19:29:00,347 FFC: INFO:   Generating code from ffc.uflacs representation
+2025-07-03 19:29:00,349 FFC: INFO:   Generating code for forms
+2025-07-03 19:29:00,349 FFC: INFO:   
+2025-07-03 19:29:00,349 FFC: INFO: Compiler stage 4 finished in 0.00186205 seconds.
+
+2025-07-03 19:29:00,349 FFC: INFO: Compiler stage 4.1 finished in 3.09944e-06 seconds.
+
+2025-07-03 19:29:00,349 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:29:00,349 FFC: INFO: ---------------------------------
+2025-07-03 19:29:00,349 FFC: INFO:   
+2025-07-03 19:29:00,349 FFC: INFO: Compiler stage 5 finished in 0.000173092 seconds.
+
+2025-07-03 19:29:00,349 FFC: INFO: FFC finished in 0.020546 seconds.
+2025-07-03 19:29:00,350 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:29:00,350 FFC: INFO: Compiling element ffc_element_d3824b28d8772bb73dfb6214fae8803d90a4bf9b
+
+2025-07-03 19:29:00,350 FFC: INFO: Compiler stage 1: Analyzing element(s)
+2025-07-03 19:29:00,350 FFC: INFO: --------------------------------------
+2025-07-03 19:29:00,350 FFC: INFO:   
+2025-07-03 19:29:00,350 FFC: INFO: Compiler stage 1 finished in 6.41346e-05 seconds.
+
+2025-07-03 19:29:00,350 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:29:00,350 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:29:00,350 FFC: INFO:   Computing representation of 1 elements
+2025-07-03 19:29:00,350 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,350 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,350 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,351 FFC: INFO:   Computing representation of 1 dofmaps
+2025-07-03 19:29:00,351 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:00,351 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:29:00,351 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:29:00,351 FFC: INFO:   Computing representation of forms
+2025-07-03 19:29:00,351 FFC: INFO:   
+2025-07-03 19:29:00,351 FFC: INFO: Compiler stage 2 finished in 0.000548124 seconds.
+
+2025-07-03 19:29:00,351 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:29:00,351 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:29:00,351 FFC: INFO:   Skipping optimizations, add -O or attach {'optimize': True} metadata to integrals
+2025-07-03 19:29:00,351 FFC: INFO:   
+2025-07-03 19:29:00,351 FFC: INFO: Compiler stage 3 finished in 7.08103e-05 seconds.
+
+2025-07-03 19:29:00,351 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:29:00,351 FFC: INFO: ---------------------------------
+2025-07-03 19:29:00,351 FFC: INFO:   Generating code for 1 finite_element(s)
+2025-07-03 19:29:00,353 FFC: INFO:   Generating code for 1 dofmap(s)
+2025-07-03 19:29:00,353 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:29:00,353 FFC: INFO:   Generating code for integrals
+2025-07-03 19:29:00,353 FFC: INFO:   Generating code for forms
+2025-07-03 19:29:00,353 FFC: INFO:   
+2025-07-03 19:29:00,353 FFC: INFO: Compiler stage 4 finished in 0.00225735 seconds.
+
+2025-07-03 19:29:00,353 FFC: INFO: Compiler stage 4.1 finished in 9.53674e-07 seconds.
+
+2025-07-03 19:29:00,353 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:29:00,353 FFC: INFO: ---------------------------------
+2025-07-03 19:29:00,353 FFC: INFO:   
+2025-07-03 19:29:00,353 FFC: INFO: Compiler stage 5 finished in 0.000216007 seconds.
+
+2025-07-03 19:29:00,353 FFC: INFO: FFC finished in 0.00327873 seconds.
+2025-07-03 19:29:47,466 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:29:47,469 FFC: INFO: Compiling form ffc_form_75cb5baff7f2727f2f931eeb9600dba9788d1a6c
+
+2025-07-03 19:29:47,469 FFC: INFO: Compiler stage 1: Analyzing form(s)
+2025-07-03 19:29:47,469 FFC: INFO: -----------------------------------
+2025-07-03 19:29:47,469 FFC: DEBUG:   Preprocessing form using 'uflacs' representation family.
+2025-07-03 19:29:47,480 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:47,480 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:47,480 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:47,481 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:47,481 FFC: INFO:   
+2025-07-03 19:29:47,481 FFC: INFO:   Geometric dimension:                 3
+  Number of exterior_facet subdomains: 2
+  Rank:                                0
+  Arguments:                           '()'
+  Number of coefficients:              3
+  Coefficients:                        '[f_13, f_16, f_31]'
+  Unique elements:                     'CG1(?,?), Vector<3 x R0(?,?)>, Vector<3 x CG
+                                       1(?,?)>'
+  Unique sub elements:                 'CG1(?,?), Vector<3 x R0(?,?)>, Vector<3 x CG
+                                       1(?,?)>, R0(?,?)'
+  
+2025-07-03 19:29:47,482 FFC: INFO:   representation:    auto --> uflacs
+2025-07-03 19:29:47,482 FFC: INFO:   quadrature_rule:   auto --> default
+2025-07-03 19:29:47,482 FFC: INFO:   quadrature_degree: auto --> 1
+2025-07-03 19:29:47,482 FFC: INFO:   quadrature_degree: 1
+2025-07-03 19:29:47,482 FFC: INFO:   
+2025-07-03 19:29:47,482 FFC: INFO: Compiler stage 1 finished in 0.0129089 seconds.
+
+2025-07-03 19:29:47,482 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:29:47,482 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:29:47,482 FFC: INFO:   Computing representation of 0 elements
+2025-07-03 19:29:47,482 FFC: INFO:   Computing representation of 0 dofmaps
+2025-07-03 19:29:47,482 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:29:47,482 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:29:47,482 FFC: INFO:   Computing uflacs representation
+2025-07-03 19:29:47,482 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,493 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,494 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,495 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,496 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,497 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,499 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,500 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,501 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,506 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,511 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,512 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,514 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,515 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,517 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,518 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,519 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,521 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,537 UFL: DEBUG: Blocks of each mode: 
+  1	full
+2025-07-03 19:29:47,537 FFC: INFO:   Computing representation of forms
+2025-07-03 19:29:47,537 FFC: INFO:   
+2025-07-03 19:29:47,537 FFC: INFO: Compiler stage 2 finished in 0.0555542 seconds.
+
+2025-07-03 19:29:47,538 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:29:47,538 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:29:47,538 FFC: INFO:   Optimizing uflacs representation
+2025-07-03 19:29:47,538 FFC: INFO:   
+2025-07-03 19:29:47,538 FFC: INFO: Compiler stage 3 finished in 9.48906e-05 seconds.
+
+2025-07-03 19:29:47,538 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:29:47,538 FFC: INFO: ---------------------------------
+2025-07-03 19:29:47,538 FFC: INFO:   Generating code for 0 finite_element(s)
+2025-07-03 19:29:47,538 FFC: INFO:   Generating code for 0 dofmap(s)
+2025-07-03 19:29:47,538 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:29:47,538 FFC: INFO:   Generating code for integrals
+2025-07-03 19:29:47,538 FFC: INFO:   Generating code from ffc.uflacs representation
+2025-07-03 19:29:47,541 FFC: INFO:   Generating code for forms
+2025-07-03 19:29:47,541 FFC: INFO:   
+2025-07-03 19:29:47,541 FFC: INFO: Compiler stage 4 finished in 0.0036099 seconds.
+
+2025-07-03 19:29:47,541 FFC: INFO: Compiler stage 4.1 finished in 4.05312e-06 seconds.
+
+2025-07-03 19:29:47,541 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:29:47,541 FFC: INFO: ---------------------------------
+2025-07-03 19:29:47,541 FFC: INFO:   
+2025-07-03 19:29:47,541 FFC: INFO: Compiler stage 5 finished in 0.00019002 seconds.
+
+2025-07-03 19:29:47,541 FFC: INFO: FFC finished in 0.0724931 seconds.
+2025-07-03 19:29:47,542 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:29:47,542 FFC: INFO: Compiling element ffc_element_6b28f35fee23c5d353d874d12b1bfc376dae2f87
+
+2025-07-03 19:29:47,542 FFC: INFO: Compiler stage 1: Analyzing element(s)
+2025-07-03 19:29:47,542 FFC: INFO: --------------------------------------
+2025-07-03 19:29:47,542 FFC: INFO:   
+2025-07-03 19:29:47,542 FFC: INFO: Compiler stage 1 finished in 7.9155e-05 seconds.
+
+2025-07-03 19:29:47,542 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:29:47,542 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:29:47,542 FFC: INFO:   Computing representation of 1 elements
+2025-07-03 19:29:47,542 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,542 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,543 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,543 FFC: INFO:   Computing representation of 1 dofmaps
+2025-07-03 19:29:47,543 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:47,543 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:29:47,543 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:29:47,543 FFC: INFO:   Computing representation of forms
+2025-07-03 19:29:47,543 FFC: INFO:   
+2025-07-03 19:29:47,543 FFC: INFO: Compiler stage 2 finished in 0.000870228 seconds.
+
+2025-07-03 19:29:47,543 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:29:47,543 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:29:47,543 FFC: INFO:   Skipping optimizations, add -O or attach {'optimize': True} metadata to integrals
+2025-07-03 19:29:47,543 FFC: INFO:   
+2025-07-03 19:29:47,543 FFC: INFO: Compiler stage 3 finished in 7.00951e-05 seconds.
+
+2025-07-03 19:29:47,543 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:29:47,543 FFC: INFO: ---------------------------------
+2025-07-03 19:29:47,543 FFC: INFO:   Generating code for 1 finite_element(s)
+2025-07-03 19:29:47,547 FFC: INFO:   Generating code for 1 dofmap(s)
+2025-07-03 19:29:47,548 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:29:47,548 FFC: INFO:   Generating code for integrals
+2025-07-03 19:29:47,548 FFC: INFO:   Generating code for forms
+2025-07-03 19:29:47,548 FFC: INFO:   
+2025-07-03 19:29:47,548 FFC: INFO: Compiler stage 4 finished in 0.00501513 seconds.
+
+2025-07-03 19:29:47,548 FFC: INFO: Compiler stage 4.1 finished in 9.53674e-07 seconds.
+
+2025-07-03 19:29:47,548 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:29:47,548 FFC: INFO: ---------------------------------
+2025-07-03 19:29:47,548 FFC: INFO:   
+2025-07-03 19:29:47,548 FFC: INFO: Compiler stage 5 finished in 0.000180006 seconds.
+
+2025-07-03 19:29:47,548 FFC: INFO: FFC finished in 0.00632334 seconds.
+2025-07-03 19:29:50,462 FFC: Level 25: Calling FFC just-in-time (JIT) compiler, this may take some time.
+2025-07-03 19:29:50,462 FFC: INFO: Compiling form ffc_form_8d3acc011b70557257bd0dc2b75c71f9a519b3e1
+
+2025-07-03 19:29:50,462 FFC: INFO: Compiler stage 1: Analyzing form(s)
+2025-07-03 19:29:50,462 FFC: INFO: -----------------------------------
+2025-07-03 19:29:50,462 FFC: DEBUG:   Preprocessing form using 'uflacs' representation family.
+2025-07-03 19:29:50,469 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:50,469 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:50,469 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:50,469 UFL: INFO: Adjusting missing element cell to tetrahedron.
+2025-07-03 19:29:50,471 FFC: INFO:   
+2025-07-03 19:29:50,471 FFC: INFO:   Geometric dimension:                 3
+  Number of exterior_facet subdomains: 3
+  Rank:                                0
+  Arguments:                           '()'
+  Number of coefficients:              3
+  Coefficients:                        '[f_13, f_16, f_32]'
+  Unique elements:                     'CG1(?,?), Vector<3 x R0(?,?)>, Vector<3 x CG
+                                       1(?,?)>'
+  Unique sub elements:                 'CG1(?,?), Vector<3 x R0(?,?)>, Vector<3 x CG
+                                       1(?,?)>, R0(?,?)'
+  
+2025-07-03 19:29:50,471 FFC: INFO:   representation:    auto --> uflacs
+2025-07-03 19:29:50,471 FFC: INFO:   quadrature_rule:   auto --> default
+2025-07-03 19:29:50,471 FFC: INFO:   quadrature_degree: auto --> 1
+2025-07-03 19:29:50,471 FFC: INFO:   quadrature_degree: 1
+2025-07-03 19:29:50,471 FFC: INFO:   
+2025-07-03 19:29:50,471 FFC: INFO: Compiler stage 1 finished in 0.00959396 seconds.
+
+2025-07-03 19:29:50,471 FFC: INFO: Compiler stage 2: Computing intermediate representation
+2025-07-03 19:29:50,471 FFC: INFO: -------------------------------------------------------
+2025-07-03 19:29:50,472 FFC: INFO:   Computing representation of 0 elements
+2025-07-03 19:29:50,472 FFC: INFO:   Computing representation of 0 dofmaps
+2025-07-03 19:29:50,472 FFC: INFO:   Computing representation of 0 coordinate mappings
+2025-07-03 19:29:50,472 FFC: INFO:   Computing representation of integrals
+2025-07-03 19:29:50,472 FFC: INFO:   Computing uflacs representation
+2025-07-03 19:29:50,472 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,472 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,472 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,472 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,472 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,472 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,472 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,479 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,480 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,481 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,482 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,483 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,484 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,485 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,486 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,487 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,489 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,489 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,490 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,492 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,493 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,495 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,496 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,497 FFC: DEBUG:   Reusing element from cache
+2025-07-03 19:29:50,509 UFL: DEBUG: Blocks of each mode: 
+  1	full
+2025-07-03 19:29:50,509 FFC: INFO:   Computing representation of forms
+2025-07-03 19:29:50,509 FFC: INFO:   
+2025-07-03 19:29:50,509 FFC: INFO: Compiler stage 2 finished in 0.0376441 seconds.
+
+2025-07-03 19:29:50,509 FFC: INFO: Compiler stage 3: Optimizing intermediate representation
+2025-07-03 19:29:50,509 FFC: INFO: --------------------------------------------------------
+2025-07-03 19:29:50,509 FFC: INFO:   Optimizing uflacs representation
+2025-07-03 19:29:50,509 FFC: INFO:   
+2025-07-03 19:29:50,509 FFC: INFO: Compiler stage 3 finished in 8.98838e-05 seconds.
+
+2025-07-03 19:29:50,509 FFC: INFO: Compiler stage 4: Generating code
+2025-07-03 19:29:50,509 FFC: INFO: ---------------------------------
+2025-07-03 19:29:50,509 FFC: INFO:   Generating code for 0 finite_element(s)
+2025-07-03 19:29:50,509 FFC: INFO:   Generating code for 0 dofmap(s)
+2025-07-03 19:29:50,509 FFC: INFO:   Generating code for 0 coordinate_mapping(s)
+2025-07-03 19:29:50,509 FFC: INFO:   Generating code for integrals
+2025-07-03 19:29:50,509 FFC: INFO:   Generating code from ffc.uflacs representation
+2025-07-03 19:29:50,512 FFC: INFO:   Generating code for forms
+2025-07-03 19:29:50,513 FFC: INFO:   
+2025-07-03 19:29:50,513 FFC: INFO: Compiler stage 4 finished in 0.00331283 seconds.
+
+2025-07-03 19:29:50,513 FFC: INFO: Compiler stage 4.1 finished in 4.76837e-06 seconds.
+
+2025-07-03 19:29:50,513 FFC: INFO: Compiler stage 5: Formatting code
+2025-07-03 19:29:50,513 FFC: INFO: ---------------------------------
+2025-07-03 19:29:50,513 FFC: INFO:   
+2025-07-03 19:29:50,513 FFC: INFO: Compiler stage 5 finished in 0.000222921 seconds.
+
+2025-07-03 19:29:50,513 FFC: INFO: FFC finished in 0.0510068 seconds.
+2025-07-03 19:29:51,460 __main__: INFO: Open pore current: 1.481288e+01 A
+2025-07-03 19:29:51,466 __main__: INFO: Running simulation with 31 positions
+2025-07-03 19:29:51,466 __main__: INFO: Z range: 150.0 to -150.0 Å, step: 10.0 Å
+2025-07-03 19:29:51,466 __main__: INFO: Pore type: cylindrical
+2025-07-03 19:29:51,466 __main__: INFO: Pore radius: 100.0 Å
+2025-07-03 19:29:51,466 __main__: INFO: Corner radius: 50.0 Å
+2025-07-03 19:29:51,466 __main__: INFO: Using van der Waals radii for accurate atomic volumes
+2025-07-03 19:29:51,466 __main__: INFO: Processing position 1/31: Z = 150.0 Å
+2025-07-03 19:30:40,749 __main__: INFO:   Current: 1.454238e+01 A (blockage: 1.8%)
+2025-07-03 19:30:40,750 __main__: INFO: Processing position 2/31: Z = 140.0 Å
+2025-07-03 19:31:32,089 __main__: INFO:   Current: 1.439192e+01 A (blockage: 2.8%)
+2025-07-03 19:31:32,090 __main__: INFO: Processing position 3/31: Z = 130.0 Å
+2025-07-03 19:32:22,174 __main__: INFO:   Current: 1.436857e+01 A (blockage: 3.0%)
+2025-07-03 19:32:22,175 __main__: INFO: Processing position 4/31: Z = 120.0 Å
+2025-07-03 19:33:10,835 __main__: INFO:   Current: 1.429963e+01 A (blockage: 3.5%)
+2025-07-03 19:33:10,836 __main__: INFO: Processing position 5/31: Z = 110.0 Å
+2025-07-03 19:34:02,589 __main__: INFO:   Current: 1.421286e+01 A (blockage: 4.1%)
+2025-07-03 19:34:02,591 __main__: INFO: Processing position 6/31: Z = 100.0 Å
+2025-07-03 19:34:52,397 __main__: INFO:   Current: 1.412478e+01 A (blockage: 4.6%)
+2025-07-03 19:34:52,397 __main__: INFO: Processing position 7/31: Z = 90.0 Å
+2025-07-03 19:35:42,898 __main__: INFO:   Current: 1.403005e+01 A (blockage: 5.3%)
+2025-07-03 19:35:42,900 __main__: INFO: Processing position 8/31: Z = 80.0 Å
+2025-07-03 19:36:31,344 __main__: INFO:   Current: 1.392860e+01 A (blockage: 6.0%)
+2025-07-03 19:36:31,346 __main__: INFO: Processing position 9/31: Z = 70.0 Å
+2025-07-03 19:37:26,429 __main__: INFO:   Current: 1.382314e+01 A (blockage: 6.7%)
+2025-07-03 19:37:26,430 __main__: INFO: Processing position 10/31: Z = 60.0 Å
+2025-07-03 19:38:19,356 __main__: INFO:   Current: 1.371871e+01 A (blockage: 7.4%)
+2025-07-03 19:38:19,357 __main__: INFO: Processing position 11/31: Z = 50.0 Å
+2025-07-03 19:39:10,286 __main__: INFO:   Current: 1.362128e+01 A (blockage: 8.0%)
+2025-07-03 19:39:10,287 __main__: INFO: Processing position 12/31: Z = 40.0 Å
+2025-07-03 19:40:06,849 __main__: INFO:   Current: 1.353638e+01 A (blockage: 8.6%)
+2025-07-03 19:40:06,852 __main__: INFO: Processing position 13/31: Z = 30.0 Å
+2025-07-03 19:40:58,859 __main__: INFO:   Current: 1.346815e+01 A (blockage: 9.1%)
+2025-07-03 19:40:58,862 __main__: INFO: Processing position 14/31: Z = 20.0 Å
+2025-07-03 19:41:50,047 __main__: INFO:   Current: 1.341892e+01 A (blockage: 9.4%)
+2025-07-03 19:41:50,050 __main__: INFO: Processing position 15/31: Z = 10.0 Å
+2025-07-03 19:42:40,648 __main__: INFO:   Current: 1.338969e+01 A (blockage: 9.6%)
+2025-07-03 19:42:40,650 __main__: INFO: Processing position 16/31: Z = 0.0 Å
+2025-07-03 19:43:30,438 __main__: INFO:   Current: 1.338055e+01 A (blockage: 9.7%)
+2025-07-03 19:43:30,440 __main__: INFO: Processing position 17/31: Z = -10.0 Å
+2025-07-03 19:44:24,032 __main__: INFO:   Current: 1.339143e+01 A (blockage: 9.6%)
+2025-07-03 19:44:24,034 __main__: INFO: Processing position 18/31: Z = -20.0 Å
+2025-07-03 19:45:16,671 __main__: INFO:   Current: 1.342262e+01 A (blockage: 9.4%)
+2025-07-03 19:45:16,674 __main__: INFO: Processing position 19/31: Z = -30.0 Å
+2025-07-03 19:46:08,815 __main__: INFO:   Current: 1.347398e+01 A (blockage: 9.0%)
+2025-07-03 19:46:08,818 __main__: INFO: Processing position 20/31: Z = -40.0 Å
+2025-07-03 19:47:03,726 __main__: INFO:   Current: 1.354438e+01 A (blockage: 8.6%)
+2025-07-03 19:47:03,728 __main__: INFO: Processing position 21/31: Z = -50.0 Å
+2025-07-03 19:47:57,889 __main__: INFO:   Current: 1.363122e+01 A (blockage: 8.0%)
+2025-07-03 19:47:57,891 __main__: INFO: Processing position 22/31: Z = -60.0 Å
+2025-07-03 19:48:52,032 __main__: INFO:   Current: 1.372975e+01 A (blockage: 7.3%)
+2025-07-03 19:48:52,034 __main__: INFO: Processing position 23/31: Z = -70.0 Å
+2025-07-03 19:49:52,598 __main__: INFO:   Current: 1.383431e+01 A (blockage: 6.6%)
+2025-07-03 19:49:52,600 __main__: INFO: Processing position 24/31: Z = -80.0 Å
+2025-07-03 19:50:46,900 __main__: INFO:   Current: 1.393912e+01 A (blockage: 5.9%)
+2025-07-03 19:50:46,902 __main__: INFO: Processing position 25/31: Z = -90.0 Å
+2025-07-03 19:51:40,347 __main__: INFO:   Current: 1.403949e+01 A (blockage: 5.2%)
+2025-07-03 19:51:40,349 __main__: INFO: Processing position 26/31: Z = -100.0 Å
+2025-07-03 19:52:32,727 __main__: INFO:   Current: 1.413307e+01 A (blockage: 4.6%)
+2025-07-03 19:52:32,728 __main__: INFO: Processing position 27/31: Z = -110.0 Å
+2025-07-03 19:53:25,595 __main__: INFO:   Current: 1.422033e+01 A (blockage: 4.0%)
+2025-07-03 19:53:25,597 __main__: INFO: Processing position 28/31: Z = -120.0 Å
+2025-07-03 19:54:16,344 __main__: INFO:   Current: 1.430369e+01 A (blockage: 3.4%)
+2025-07-03 19:54:16,344 __main__: INFO: Processing position 29/31: Z = -130.0 Å
+2025-07-03 19:55:08,190 __main__: INFO:   Current: 1.438642e+01 A (blockage: 2.9%)
+2025-07-03 19:55:08,191 __main__: INFO: Processing position 30/31: Z = -140.0 Å
+2025-07-03 19:56:07,948 __main__: INFO:   Current: 1.447094e+01 A (blockage: 2.3%)
+2025-07-03 19:56:07,950 __main__: INFO: Processing position 31/31: Z = -150.0 Å
+2025-07-03 19:57:00,259 __main__: INFO:   Current: 1.455417e+01 A (blockage: 1.7%)
+2025-07-03 19:57:00,260 __main__: INFO: Simulation complete!
+2025-07-03 19:57:00,261 __main__: INFO: Maximum blockage: 9.7% at Z = 0.0 Å
+2025-07-03 19:57:00,263 __main__: INFO: Execution completed successfully!
+

@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "generated_by": "PETK GUI",
+    "timestamp": "2025-07-03 19:28:20",
+    "version": "1.0"
+  },
+  "input": {
+    "moving_pdb": "../centered_nucleosome.pdb"
+  },
+  "pore_geometry": {
+    "pore_type": "Cylindrical",
+    "pore_radius": 100.0,
+    "corner_radius": 50.0,
+    "membrane_thickness": 200.0
+  },
+  "simulation": {
+    "voltage": 100.0,
+    "bulk_conductivity": 1.05,
+    "grid_resolution": 2.0,
+    "use_vdw_radii": true,
+    "default_radius": 1.5
+  },
+  "movement": {
+    "z_start": 150.0,
+    "z_end": -150.0,
+    "z_step": 10.0
+  },
+  "output": {
+    "output_prefix": "vertical_movement",
+    "preview_frames": 5
+  },
+  "box_dimensions": {
+    "x": [-150.0, 150.0],
+    "y": [-150.0, 150.0],
+    "z": [-150.0, 150.0]
+  }
+}
