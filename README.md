@@ -116,7 +116,7 @@ The application can automatically create a conda environment with these packages
 
 The included `vertical_movement_sem.py` module provides:
 - **FEniCS-based SEM calculations**
-- **Van der Waals radii database** for accurate atomic volume calculations
+- **Van der Waals radii database**
 - **Multiple pore geometries** (cylindrical, double-cone)
 - **JSON configuration support**
 - **Visualization capabilities**
