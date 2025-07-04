@@ -219,7 +219,15 @@ python vertical_movement_sem.py config.json preview_only
 
 If you use PETK GUI in your research, please cite:
 ```
-[Citation information to be added]
+@article{wilson2019rapid, title={Rapid and accurate determination of nanopore ionic current using a steric exclusion model},
+author={Wilson, James and Sarthak, Kumar and Si, Wei and Gao, Luyu and Aksimentiev, Aleksei},
+journal={Acs Sensors},
+volume={4},
+number={3},
+pages={634--644},
+year={2019},
+publisher={ACS Publications}
+}
 ```
 
 ## License
