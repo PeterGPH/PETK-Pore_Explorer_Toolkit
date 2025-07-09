@@ -4,22 +4,6 @@
 
 PETK GUI (Pore Explorer Toolkit Graphical User Interface) is a comprehensive tool for analyzing molecular structures and their interactions with nanopores. The application provides an intuitive interface for molecular analysis, nanopore geometry design, and steric exclusion model (SEM) calculations.
 
-## Features
-
-### 🧬 Molecular Analysis (Tab 1: Nanopore Analyte Analysis)
-- **PDB File Analysis**: Load and analyze protein structures from PDB files
-- **Molecular Centering**: Automatically center molecules at the origin with surface alignment
-- **Dimensional Analysis**: Calculate molecular dimensions, volumes, and bounding radii
-- **Nanopore Compatibility**: Check if molecules fit through specified nanopore geometries
-- **Quality Verification**: Verify centering and alignment quality with detailed scoring
-
-### 🔬 SEM Calculation Setup (Tab 2: SEM Calculation Setup)
-- **Pore Geometry Design**: Support for cylindrical and double-cone nanopore geometries
-- **Parameter Configuration**: Set up simulation parameters including voltages, conductivities, and grid resolution
-- **Python Environment Management**: Integrated conda environment setup for FEniCS calculations
-- **Preview Generation**: Generate visualization previews of molecular movement through nanopores
-- **Full SEM Simulation**: Run complete SEM calculations with current blockage analysis
-
 ## Installation
 
 ### Prerequisites
@@ -60,56 +44,94 @@ The application can automatically create a conda environment with these packages
 
 ## Usage Guide
 
-### Tab 1: Molecular Analysis
+### Tab 1: Nanopore Setup
 
 #### Basic Workflow
-1. **Set Project Information**
+1. **Configure Output Settings**
    - Select working directory
-   - Configure nanopore parameters (diameter, thickness) for checking the fitness of analyte
+   - Set output file prefix
 
-2. **Load Molecular Structure**
+2. **Set Box Dimensions**
+   - Choose auto-calculated (recommended) or manual mode
+   - Configure distance cutoff for auto-calculation
+   - View real-time dimension calculations
+
+3. **Design Pore Geometry**
+   - Select pore type: Cylindrical or Double-Cone
+   - Configure pore-specific parameters:
+     - **Cylindrical**: Diameter, corner radius, thickness
+     - **Double-Cone**: Inner diameter, outer diameter, thickness
+
+4. **Visualize and Validate**
+   - View real-time 3D pore visualization in VMD
+   - Check parameter validity status
+   - Update preview as needed
+
+#### Key Features
+- **Native VMD Integration**: Real-time 3D visualization with membrane and pore geometry
+- **Automatic Validation**: Comprehensive checking of pore-box compatibility
+- **Visual Feedback**: Color-coded status indicators for invalid configurations
+
+### Tab 2: Analyte Setup
+
+#### Basic Workflow
+1. **Load Molecular Structure**
    - Browse and select PDB file
    - Specify atom selection (default: "all")
    - Click "Analyze & Center" to process
 
-3. **Review Results**
+2. **Review Analysis Results**
    - Check molecular dimensions and nanopore fit status
-   - Review centering quality scores
-   - Export analysis report if needed
+   - Review centering and alignment quality scores
+   - View detailed molecular information
 
-4. **Visualization**
-   - Use visualization controls to display molecule
-   - Cycle through different representations
-   - Center view as needed
+3. **Visualization Controls**
+   - Show/hide molecule in VMD
+   - Change molecular representations
+   - Center view and cycle through display styles
 
-#### Key Features
-- **Automatic Centering**: Centers molecules at origin with optimal surface alignment
-- **Fit Analysis**: Determines if molecules can pass through specified nanopores
-- **Quality Scoring**: Provides detailed verification of centering accuracy
+4. **Export Results**
+   - Export detailed analysis report
+   - Save centered PDB file for SEM calculations
 
-### Tab 2: SEM Calculation Setup
+#### Enhanced Features
+- **Intelligent Surface Alignment**: Automatically orients molecules for optimal pore passage
+- **Quality Scoring**: 12-point verification system for centering accuracy
+- **Fit Analysis**: Real-time compatibility checking with designed nanopore
+- **Detailed Reporting**: Comprehensive molecular analysis with exportable reports
+
+### Tab 3: SEM Setup
 
 #### Basic Workflow
-1. **Select Pore Type**
-   - Choose between cylindrical or double-cone geometries
-   - Configure pore-specific parameters
+1. **Configure Simulation Parameters**
+   - Set applied voltage and conductivities
+   - Configure grid resolution and VdW radii settings
+   - Define analyte movement parameters (Z range and step size)
 
-2. **Configure Input Files**
-   - Load centered analyte PDB (can sync from Tab 1)
-
-3. **Set Simulation Parameters**
-   - Define applied voltage and conductivities
-   - Configure grid resolution and box dimensions
-   - Set analyte movement parameters
-
-4. **Environment Setup**
+2. **Python Environment Setup**
    - Create or select conda environment
-   - Test Python/FEniCS installation
-   - Validate all parameters
+   - Test Python/FEniCS installation using "Test Python" button
+   - Use "Create SEM Env" for automatic environment setup
 
-5. **Run Calculations**
-   - Generate preview frames for visualization
-   - Run full SEM simulation
+3. **Validate and Run**
+   - Use "Validate Parameters" to check all settings
+   - Generate trajectory preview with "Preview Simulation"
+   - Run full SEM calculation with "Run Simulation"
+
+#### Key Features
+- **One-Click Environment Setup**: Automatic creation of complete FEniCS environment
+- **Real-time Validation**: Comprehensive parameter checking before calculation
+- **Trajectory Preview**: Visual preview of analyte movement through nanopore
+- **Grid Estimation**: Real-time calculation of computational requirements
+
+## Enhanced Features
+
+### Native VMD Visualization
+- **Real-time 3D Pore Rendering**: Live visualization of nanopore geometry
+- **Membrane Representation**: Visual membrane with pore cutouts
+- **Parameter Integration**: Automatic updates when parameters change
+- **Validation Feedback**: Visual warnings for invalid configurations
+
   
 ## Python SEM Module
 
@@ -134,13 +156,14 @@ python vertical_movement_sem.py config.json preview_only
 
 ### Input Files
 - **PDB Files**: Protein Data Bank format for molecular structures
-
+- 
 ### Output Files
 - **Centered PDB**: Molecule centered at origin with surface alignment
 - **JSON Config**: Configuration files for SEM calculation
 - **Analysis Reports**: Detailed text reports of molecular analysis
 - **SEM Results**: Current vs. position data from SEM calculations
-- **Preview Images**: Visualization of molecular movement through nanopores
+- **Trajectory Files**: DCD trajectories for movement preview
+- **Preview Images**: Visualization of molecular movement through nanopores (optional)
 
 ## Troubleshooting
 
@@ -227,8 +250,15 @@ publisher={ACS Publications}
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Version History
+### Current Version 0.0.1
 
-### Current Version 0.0.0
+- New 3-tab interface: Separated nanopore design, analyte setup, and SEM calculation
+- Native VMD visualization: Real-time 3D pore geometry rendering
+- Trajectory preview: Visual preview of analyte movement through nanopores
+
+
+
+### Previous Version 0.0.0
 - Initial release with molecular analysis and SEM calculation capabilities assuming vertical passage of analyte through solid-state nanopore
 - Support for cylindrical and double-cone pore geometries
 - Integrated Python environment management

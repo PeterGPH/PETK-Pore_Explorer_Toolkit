@@ -8,11 +8,6 @@ namespace eval ::PETK::gui {
 proc ::PETK::gui::petk_gui {} {
     variable window
 
-    # Initialize if needed
-    if {![info exists ::PETK::gui::projectName]} {
-        ::PETK::gui::newProject
-    }
-
     # If window already exists, bring it up
     if { [winfo exists $window] } {
         wm deiconify $window
@@ -44,14 +39,6 @@ proc ::PETK::gui::petk_gui {} {
     $menu add cascade -menu $menu.options -label "Options"
     $menu add cascade -menu $menu.help    -label "Help"
 
-    $menu.file add command -label "New project"          -command { ::PETK::gui::newProject }
-    $menu.file add command -label "Load project..."      -command { ::PETK::gui::loadProject }
-    $menu.file add separator
-    $menu.file add command -label "Save current project" -command { ::PETK::gui::saveProject }
-    $menu.file add command -label "Save project as..."   -command { ::PETK::gui::saveProject }
-    $menu.file add separator
-    $menu.file add command -label "Close project"        -command { ::PETK::gui::newProject }
-
     if {![string eq "Darwin" $::tcl_platform(os)]} {
         $menu.file add separator
         $menu.file add command -label "Preferences..."      -command  ::PETK::gui::showPref -font TkMenuFont
@@ -69,24 +56,26 @@ proc ::PETK::gui::petk_gui {} {
     ttk::frame $window.hlf
     grid $window.hlf  -column 0 -row 0 -sticky nsew
     grid columnconfigure $window.hlf 0 -weight 1
-    grid rowconfigure    $window.hlf {0 1} -weight 1
+    grid rowconfigure    $window.hlf 0 -weight 1  ; # Give weight to row 0 (notebook row)
 
     ### Notebook
     ttk::notebook $window.hlf.nb
     grid $window.hlf.nb -column 0 -row 0 -sticky nsew
 
-    ### Configure resizability
+    ### CRITICAL FIX: Configure notebook to expand its content
     grid columnconfigure $window.hlf.nb 0 -weight 1
-    grid rowconfigure    $window.hlf.nb 1 -weight 1
+    grid rowconfigure    $window.hlf.nb 0 -weight 1   ; # FIXED: Was 1, should be 0!
 
-    $window.hlf.nb add [ttk::frame $window.hlf.nb.tab1] -text "NanoporeAnalyte Analysis"
-    $window.hlf.nb add [ttk::frame $window.hlf.nb.tab2] -text "SEM Calculation Setup"
+    $window.hlf.nb add [ttk::frame $window.hlf.nb.tab1] -text "Nanopore Setup"
+    $window.hlf.nb add [ttk::frame $window.hlf.nb.tab2] -text "Analyte Setup"
+    $window.hlf.nb add [ttk::frame $window.hlf.nb.tab3] -text "SEM Setup"
     ttk::notebook::enableTraversal $window.hlf.nb
 
     foreach kid [winfo children $window.hlf.nb] {
         set name [string range [file extension $kid] 1 end]
         set [set name] $kid
         grid columnconfigure $kid 0 -weight 1
+        grid rowconfigure $kid 0 -weight 1   ; # ADDED: Give each tab weight too
         
         # Store as global variables for access from other procedures
         set ::PETK::gui::$name $kid
@@ -100,203 +89,361 @@ proc ::PETK::gui::petk_gui {} {
     grid $window.hlf.nav.back $window.hlf.nav.next
     
     ####################################################
-    # Tab 1: Nanopore Analyte Analysis 
+    # Tab 1: Nanopore Setup
     ####################################################
     buildTab1 $tab1
 
     ####################################################
-    # Tab 2: SEM Calculation Setup
+    # Tab 2: Analyte Setup
     ####################################################
     buildTab2 $tab2
+
+    ####################################################
+    # Tab 3: SEM Setup
+    ####################################################
+    buildTab3 $tab3
 
     return $window
 }
 
-
 ####################################################
-# Tab 1: Analyte Analysis
+# Tab 2: Membrane and Nanopore Builder
 ####################################################
 
 proc ::PETK::gui::buildTab1 {tab1} {
-    ::PETK::gui::initialize
+    ::PETK::gui::initializeMembraneVariables
+
+    # === CRITICAL: Configure tab to expand ===
     grid columnconfigure $tab1 0 -weight 1
-    grid rowconfigure    $tab1 {1 2 3 4 5} -weight 1
+    grid rowconfigure $tab1 0 -weight 1
 
-    ## === Project Settings Frame ===
-    ttk::labelframe $tab1.project -text "Project Settings" -padding 10
-    grid $tab1.project -column 0 -row 0 -sticky ew -pady "10 10" -padx 10
-    grid columnconfigure $tab1.project {1 2} -weight 1
+    # Create scrollable canvas container
+    canvas $tab1.canvas -highlightthickness 0
+    ttk::scrollbar $tab1.vscroll -orient vertical -command [list $tab1.canvas yview]
+    ttk::scrollbar $tab1.hscroll -orient horizontal -command [list $tab1.canvas xview]
+    
+    # Configure canvas scrolling
+    $tab1.canvas configure -yscrollcommand [list $tab1.vscroll set]
+    $tab1.canvas configure -xscrollcommand [list $tab1.hscroll set]
+    
+    # Create the actual content frame inside the canvas
+    ttk::frame $tab1.canvas.content
+    set canvas_window [$tab1.canvas create window 0 0 -anchor nw -window $tab1.canvas.content]
+    
+    # Grid the canvas and scrollbars with proper expansion
+    grid $tab1.canvas -row 0 -column 0 -sticky nsew
+    grid $tab1.vscroll -row 0 -column 1 -sticky ns
+    grid $tab1.hscroll -row 1 -column 0 -sticky ew
+    
+    # Configure grid weights - CRITICAL for expansion
+    grid rowconfigure $tab1 0 -weight 1
+    grid columnconfigure $tab1 0 -weight 1
 
-    ttk::label  $tab1.project.namelbl -text "Project name:" -width 15
-    # ttk::entry  $tab1.project.name -textvariable ::PETK::gui::projectName -width 30
-    ttk::label  $tab1.project.dirlbl -text "Work directory:" -width 15
-    ttk::entry  $tab1.project.dir -textvariable ::PETK::gui::workdir -width 30
-    ttk::button $tab1.project.browse -text "Browse..." -command ::PETK::gui::selectWorkDir
+    # Now use the content frame as your container
+    set container $tab1.canvas.content
+    grid columnconfigure $container 0 -weight 1
+    set row 0
+    
+    # === OUTPUT SETTINGS SECTION ===
+    ttk::labelframe $container.output -text "Output Settings" -padding 10
+    grid $container.output -row $row -column 0 -sticky ew -padx 10 -pady 5
+    grid columnconfigure $container.output {1 2} -weight 1
+    incr row
 
-    # grid $tab1.project.namelbl $tab1.project.name - -sticky ew -pady 3
-    grid $tab1.project.dirlbl $tab1.project.dir $tab1.project.browse -sticky ew -pady 3
+    # Output directory
+    ttk::label $container.output.dirlbl -text "Output directory:" -width 18
+    ttk::entry $container.output.dir -textvariable ::PETK::gui::workdir -width 35
+    ttk::button $container.output.browsedir -text "Browse..." -command {::PETK::gui::selectWorkDir}
 
-    # === Nanopore Configuration Frame ===
-    ttk::labelframe $tab1.nanopore -text "Target Nanopore Configuration" -padding 10
-    grid $tab1.nanopore -column 0 -row 1 -sticky ew -pady "0 10" -padx 10
-    grid columnconfigure $tab1.nanopore {1 3} -weight 1
+    # Output prefix
+    ttk::label $container.output.prefixlbl -text "Output prefix:" -width 18
+    ttk::entry $container.output.prefix -textvariable ::PETK::gui::outputPrefix -width 25
 
-    ttk::label $tab1.nanopore.diameterlbl -text "Pore diameter (Å):" -width 15
-    ttk::entry $tab1.nanopore.diameter -textvariable ::PETK::gui::poreDiameter -width 15 -justify center
-    ttk::label $tab1.nanopore.thicknesslbl -text "Membrane thickness (Å):" -width 18
-    ttk::entry $tab1.nanopore.thickness -textvariable ::PETK::gui::poreThickness -width 15 -justify center
+    grid $container.output.dirlbl $container.output.dir $container.output.browsedir -sticky ew -pady 3
+    grid $container.output.prefixlbl $container.output.prefix - -sticky ew -pady 3
+    
+    # === BOX DIMENSIONS SECTION ===
+    ttk::labelframe $container.boxdim -text "Box Dimensions" -padding 10
+    grid $container.boxdim -row $row -column 0 -sticky ew -padx 10 -pady 5
+    grid columnconfigure $container.boxdim {1 3 5} -weight 1
+    incr row
 
-    # Bind changes to update fit status
-    bind $tab1.nanopore.diameter <KeyRelease> {after idle ::PETK::gui::updateFitStatus}
-    bind $tab1.nanopore.thickness <KeyRelease> {after idle ::PETK::gui::updateFitStatus}
+    # Auto-calculate checkbox
+    ttk::checkbutton $container.boxdim.auto -text "Auto-calculate box dimensions" \
+        -variable ::PETK::gui::autoCalculateBoxDimensions -command {::PETK::gui::toggleBoxDimensionMode}
+    ttk::label $container.boxdim.cutofflbl -text "Distance cutoff (Å):" -width 18
+    ttk::entry $container.boxdim.cutoff -textvariable ::PETK::gui::sysCutoff -width 12 -justify center
 
-    grid $tab1.nanopore.diameterlbl $tab1.nanopore.diameter $tab1.nanopore.thicknesslbl $tab1.nanopore.thickness -sticky ew -pady 3 -padx 5
+    grid $container.boxdim.auto $container.boxdim.cutofflbl $container.boxdim.cutoff -columnspan 6 -sticky w -pady "0 5"
 
-    # === Analyte Input Frame ===
-    ttk::labelframe $tab1.input -text "Analyte Input" -padding 10
-    grid $tab1.input -column 0 -row 2 -sticky ew -pady "0 10" -padx 10
-    grid columnconfigure $tab1.input {1 2} -weight 1
+    # Manual box dimension inputs
+    ttk::frame $container.boxdim.manual
+    ttk::label $container.boxdim.manual.xlbl -text "X size (Å):" -width 12
+    ttk::entry $container.boxdim.manual.x -textvariable ::PETK::gui::boxSizeX -width 12 -justify center
+    ttk::label $container.boxdim.manual.ylbl -text "Y size (Å):" -width 12
+    ttk::entry $container.boxdim.manual.y -textvariable ::PETK::gui::boxSizeY -width 12 -justify center
+    ttk::label $container.boxdim.manual.zlbl -text "Z size (Å):" -width 12
+    ttk::entry $container.boxdim.manual.z -textvariable ::PETK::gui::boxSizeZ -width 12 -justify center
 
-    ttk::label  $tab1.input.pdblbl -text "PDB file:" -width 12
-    ttk::entry  $tab1.input.pdb -textvariable ::PETK::gui::analytePDB -width 35
-    ttk::button $tab1.input.browse -text "Browse..." -command ::PETK::gui::browseAnalytePdb
-    ttk::button $tab1.input.analyze -text "Analyze & Center" -command ::PETK::gui::analyzeAnalyte -style "Accent.TButton"
+    grid $container.boxdim.manual.xlbl $container.boxdim.manual.x $container.boxdim.manual.ylbl $container.boxdim.manual.y $container.boxdim.manual.zlbl $container.boxdim.manual.z -sticky ew -pady 2
 
-    ttk::label  $tab1.input.sellbl -text "Atom selection:" -width 12
-    ttk::entry  $tab1.input.sel -textvariable ::PETK::gui::analyteSelection -width 35
-    ttk::label  $tab1.input.selhelp -text "Examples: 'all', 'protein', 'not water'" -font {TkDefaultFont 9 italic} -foreground gray
+    # Auto-calculated dimension display
+    ttk::frame $container.boxdim.auto_display
+    ttk::label $container.boxdim.auto_display.title -text "Auto-calculated dimensions:" -font {TkDefaultFont 10 bold}
+    grid $container.boxdim.auto_display.title -columnspan 6 -sticky w -pady "0 5"
 
-    grid $tab1.input.pdblbl $tab1.input.pdb $tab1.input.browse $tab1.input.analyze -sticky ew -pady 3
-    grid $tab1.input.sellbl $tab1.input.sel $tab1.input.selhelp - -sticky ew -pady 3
+    ttk::label $container.boxdim.auto_display.xlbl -text "X range:" -width 12
+    ttk::label $container.boxdim.auto_display.xval -textvariable ::PETK::gui::autoBoxX -width 25 -anchor w -relief sunken -background white
 
-    # === Analysis Results Frame ===
-    ttk::labelframe $tab1.results -text "Analysis Results" -padding 10
-    grid $tab1.results -column 0 -row 3 -sticky nsew -pady "0 10" -padx 10
-    grid columnconfigure $tab1.results {0 1} -weight 1
-    grid rowconfigure $tab1.results 4 -weight 1
+    ttk::label $container.boxdim.auto_display.ylbl -text "Y range:" -width 12
+    ttk::label $container.boxdim.auto_display.yval -textvariable ::PETK::gui::autoBoxY -width 25 -anchor w -relief sunken -background white
 
-    # Results display in two columns
-    # Left column - Basic measurements
-    ttk::frame $tab1.results.left
-    grid $tab1.results.left -column 0 -row 0 -sticky nsew -padx "0 10"
-    grid rowconfigure $tab1.results.left 6 -weight 1
+    ttk::label $container.boxdim.auto_display.zlbl -text "Z range:" -width 12
+    ttk::label $container.boxdim.auto_display.zval -textvariable ::PETK::gui::autoBoxZ -width 25 -anchor w -relief sunken -background white
 
-    ttk::label $tab1.results.left.title -text "Molecular Dimensions" -font {TkDefaultFont 11 bold}
-    grid $tab1.results.left.title -sticky w -pady "0 10"
+    grid $container.boxdim.auto_display.xlbl $container.boxdim.auto_display.xval - - - - -sticky ew -pady 2
+    grid $container.boxdim.auto_display.ylbl $container.boxdim.auto_display.yval - - - - -sticky ew -pady 2
+    grid $container.boxdim.auto_display.zlbl $container.boxdim.auto_display.zval - - - - -sticky ew -pady 2
 
-    # Bounding sphere radius
-    ttk::label $tab1.results.left.radiuslbl -text "Bounding radius:" -width 15
-    ttk::label $tab1.results.left.radius -textvariable ::PETK::gui::analyteDiameter -width 15 -anchor w -relief sunken -background white
-    grid $tab1.results.left.radiuslbl $tab1.results.left.radius -sticky ew -pady 2
+    ttk::button $container.boxdim.auto_display.calc -text "Recalculate Box" -command {::PETK::gui::calculateBoxDimensions}
+    grid $container.boxdim.auto_display.calc -row 3 -column 10 -columnspan 2 -sticky w -pady "5 0"
 
-    # Approximate volume
-    ttk::label $tab1.results.left.vollbl -text "Approx. volume:" -width 15
-    ttk::label $tab1.results.left.vol -textvariable ::PETK::gui::analyteVolume -width 15 -anchor w -relief sunken -background white
-    grid $tab1.results.left.vollbl $tab1.results.left.vol -sticky ew -pady 2
+    # Grid the appropriate frame based on mode
+    if {$::PETK::gui::autoCalculateBoxDimensions} {
+        grid $container.boxdim.auto_display -row 1 -column 0 -columnspan 6 -sticky ew
+    } else {
+        grid $container.boxdim.manual -row 1 -column 0 -columnspan 6 -sticky ew
+    }
 
-    # Extreme atom distance
-    ttk::label $tab1.results.left.distlbl -text "Max distance:" -width 15
-    ttk::label $tab1.results.left.dist -textvariable ::PETK::gui::analyteDistance -width 15 -anchor w -relief sunken -background white
-    grid $tab1.results.left.distlbl $tab1.results.left.dist -sticky ew -pady 2
+    # === PORE TYPE SELECTION ===
+    ttk::labelframe $container.poretype -text "Nanopore Type Selection" -padding 10
+    grid $container.poretype -row $row -column 0 -sticky ew -padx 10 -pady "10 5"
+    grid columnconfigure $container.poretype {0 1} -weight 1
+    incr row
 
-    # Fit status with nanopore
-    ttk::label $tab1.results.left.statuslbl -text "Pore fit status:" -width 15
-    ttk::label $tab1.results.left.statusval -textvariable ::PETK::gui::fitStatus -width 15 -anchor w -relief sunken -background white -wraplength 120
-    grid $tab1.results.left.statuslbl $tab1.results.left.statusval -sticky ew -pady 2
+    ttk::radiobutton $container.poretype.cylindrical -text "Cylindrical Pore" -value "cylindrical" \
+        -variable ::PETK::gui::membraneType -command {::PETK::gui::updateMembraneTypeDisplay}
+    ttk::radiobutton $container.poretype.doublecone -text "Double Cone Pore" -value "doublecone" \
+        -variable ::PETK::gui::membraneType -command {::PETK::gui::updateMembraneTypeDisplay}
 
-    # Right column - Centering information
-    ttk::frame $tab1.results.right
-    grid $tab1.results.right -column 1 -row 0 -sticky nsew -padx "10 0"
-    grid rowconfigure $tab1.results.right 6 -weight 1
+    grid $container.poretype.cylindrical $container.poretype.doublecone -sticky w -pady 3 -padx 20
 
-    ttk::label $tab1.results.right.title -text "Centering & Alignment" -font {TkDefaultFont 11 bold}
-    grid $tab1.results.right.title -sticky w -pady "0 10"
+    # === PORE PARAMETERS SECTION ===
+    ttk::labelframe $container.params -text "Pore Parameters" -padding 10
+    grid $container.params -row $row -column 0 -sticky ew -padx 10 -pady 5
+    grid columnconfigure $container.params {1 3 5} -weight 1
+    incr row
 
-    # Verification score
-    ttk::label $tab1.results.right.scorelbl -text "Quality score:" -width 15
-    ttk::label $tab1.results.right.score -textvariable ::PETK::gui::verificationScore -width 15 -anchor w -relief sunken -background white
-    grid $tab1.results.right.scorelbl $tab1.results.right.score -sticky ew -pady 2
+    # Common parameter: Nanopore thickness
+    ttk::label $container.params.thicklbl -text "Nanopore thickness (Å):" -width 20
+    ttk::entry $container.params.thick -textvariable ::PETK::gui::nanoporeThickness -width 12 -justify center
 
-    # Centering status
-    ttk::label $tab1.results.right.centerlbl -text "Centering:" -width 15
-    ttk::label $tab1.results.right.center -textvariable ::PETK::gui::centeringStatus -width 15 -anchor w -relief sunken -background white
-    grid $tab1.results.right.centerlbl $tab1.results.right.center -sticky ew -pady 2
+    grid $container.params.thicklbl $container.params.thick - - - -sticky ew -pady 5
 
-    # Surface alignment status
-    ttk::label $tab1.results.right.alignlbl -text "Surface align:" -width 15
-    ttk::label $tab1.results.right.align -textvariable ::PETK::gui::alignmentStatus -width 15 -anchor w -relief sunken -background white
-    grid $tab1.results.right.alignlbl $tab1.results.right.align -sticky ew -pady 2
+    # Cylindrical pore parameters
+    ttk::frame $container.params.cyl
+    ttk::label $container.params.cyl.diamlbl -text "Pore diameter (Å):" -width 20
+    ttk::entry $container.params.cyl.diam -textvariable ::PETK::gui::cylindricalDiameter -width 12 -justify center
+    ttk::label $container.params.cyl.radiuslbl -text "Corner radius (Å):" -width 15
+    ttk::entry $container.params.cyl.radius -textvariable ::PETK::gui::cornerRadius -width 12 -justify center
 
-    # Output file status
-    ttk::label $tab1.results.right.outputlbl -text "Centered PDB:" -width 15
-    ttk::label $tab1.results.right.output -textvariable ::PETK::gui::outputFileStatus -width 15 -anchor w -relief sunken -background white -wraplength 120
-    grid $tab1.results.right.outputlbl $tab1.results.right.output -sticky ew -pady 2
+    grid $container.params.cyl.diamlbl $container.params.cyl.diam $container.params.cyl.radiuslbl $container.params.cyl.radius -sticky ew -pady 3 -padx 5
 
-    # === Detailed Information Frame (Expandable) ===
-    ttk::labelframe $tab1.details -text "Detailed Information" -padding 10
-    grid $tab1.details -column 0 -row 4 -sticky nsew -pady "0 10" -padx 10
-    grid columnconfigure $tab1.details 0 -weight 1
-    grid rowconfigure $tab1.details 1 -weight 1
+    # Double cone pore parameters
+    ttk::frame $container.params.cone
+    ttk::label $container.params.cone.innerlbl -text "Inner diameter (Å):" -width 20
+    ttk::entry $container.params.cone.inner -textvariable ::PETK::gui::innerDiameter -width 12 -justify center
+    ttk::label $container.params.cone.outerlbl -text "Outer diameter (Å):" -width 15
+    ttk::entry $container.params.cone.outer -textvariable ::PETK::gui::outerDiameter -width 12 -justify center
 
-    # Toggle button for detailed view
-    ttk::frame $tab1.details.header
-    grid $tab1.details.header -sticky ew -pady "0 5"
-    grid columnconfigure $tab1.details.header 0 -weight 1
+    grid $container.params.cone.innerlbl $container.params.cone.inner $container.params.cone.outerlbl $container.params.cone.outer -sticky ew -pady 3 -padx 5
 
-    ttk::button $tab1.details.header.toggle -text "▼ Show Details" -command ::PETK::gui::toggleDetailView
-    ttk::button $tab1.details.header.export -text "Export Report" -command ::PETK::gui::exportAnalysisReport
-    grid $tab1.details.header.toggle -sticky w
-    grid $tab1.details.header.export -sticky e -row 0 -column 1
+    # === VISUALIZATION SECTION ===
+    ttk::labelframe $container.visualization -text "Pore Geometry Visualization" -padding 10
+    grid $container.visualization -row $row -column 0 -sticky nsew -padx 10 -pady 5
+    grid columnconfigure $container.visualization {0 1} -weight 1
+    grid rowconfigure $container.visualization 1 -weight 1
+    incr row
 
-    # Scrollable text area for detailed information
-    ttk::frame $tab1.details.content
-    text $tab1.details.content.text -height 8 -width 80 -wrap word -state disabled \
-        -yscrollcommand [list $tab1.details.content.scroll set] -font {TkFixedFont 9}
-    ttk::scrollbar $tab1.details.content.scroll -orient vertical -command [list $tab1.details.content.text yview]
+    # Image display frame
+    ttk::frame $container.visualization.image
+    grid $container.visualization.image -column 0 -row 0 -rowspan 2 -sticky nsew -padx "0 10"
+    grid rowconfigure $container.visualization.image 0 -weight 1
+    grid columnconfigure $container.visualization.image 0 -weight 1
 
-    grid $tab1.details.content.text $tab1.details.content.scroll -sticky nsew
-    grid columnconfigure $tab1.details.content 0 -weight 1
-    grid rowconfigure $tab1.details.content 0 -weight 1
+    # Create canvas for image display
+    canvas $container.visualization.image.canvas -width 300 -height 250 -bg white -relief sunken -borderwidth 2
+    grid $container.visualization.image.canvas -sticky nsew
 
-    # Store reference to text widget and initially hide details
-    set ::PETK::gui::detailsTextWidget $tab1.details.content.text
-    set ::PETK::gui::detailsVisible 0
+    # Store canvas reference for image updates
+    set ::PETK::gui::poreImageCanvas $container.visualization.image.canvas
+    
+    # Parameter summary frame
+    ttk::frame $container.visualization.summary
+    grid $container.visualization.summary -column 1 -row 0 -sticky nsew -padx "10 0"
+    grid rowconfigure $container.visualization.summary 6 -weight 1
 
-    # === Visualization Controls Frame ===
-    ttk::labelframe $tab1.controls -text "Visualization & Actions" -padding 10
-    grid $tab1.controls -column 0 -row 5 -sticky ew -pady "0 10" -padx 10
-    grid columnconfigure $tab1.controls {0 1 2 3} -weight 1
+    ttk::label $container.visualization.summary.title -text "Current Configuration" -font {TkDefaultFont 11 bold}
+    grid $container.visualization.summary.title -sticky w -pady "0 10"
 
-    ttk::button $tab1.controls.show -text "Show Molecule" -command ::PETK::gui::showAnalyte
-    ttk::button $tab1.controls.hide -text "Hide Molecule" -command ::PETK::gui::hideAnalyte
-    ttk::button $tab1.controls.center -text "Center View" -command ::PETK::gui::centerAnalyteView
-    ttk::button $tab1.controls.representations -text "Change Rep" -command ::PETK::gui::cycleAnalyteRepresentation
+    # Parameter display labels
+    ttk::label $container.visualization.summary.typelbl -text "Pore type:" -width 15
+    ttk::label $container.visualization.summary.type -textvariable ::PETK::gui::currentPoreType -width 15 -anchor w -relief sunken -background white
+    grid $container.visualization.summary.typelbl $container.visualization.summary.type -sticky ew -pady 2
 
-    grid $tab1.controls.show $tab1.controls.hide $tab1.controls.center $tab1.controls.representations -sticky ew -padx 5
+    ttk::label $container.visualization.summary.thicklbl -text "Thickness:" -width 15
+    ttk::label $container.visualization.summary.thickval -textvariable ::PETK::gui::displayThickness -width 15 -anchor w -relief sunken -background white
+    grid $container.visualization.summary.thicklbl $container.visualization.summary.thickval -sticky ew -pady 2
 
-    # Initialize result variables
-    ::PETK::gui::initializeResultVariables
+    ttk::label $container.visualization.summary.param1lbl -text "Parameter 1:" -width 15
+    ttk::label $container.visualization.summary.param1val -textvariable ::PETK::gui::displayParam1 -width 15 -anchor w -relief sunken -background white
+    grid $container.visualization.summary.param1lbl $container.visualization.summary.param1val -sticky ew -pady 2
+
+    ttk::label $container.visualization.summary.param2lbl -text "Parameter 2:" -width 15
+    ttk::label $container.visualization.summary.param2val -textvariable ::PETK::gui::displayParam2 -width 15 -anchor w -relief sunken -background white
+    grid $container.visualization.summary.param2lbl $container.visualization.summary.param2val -sticky ew -pady 2
+
+    # Volume calculation
+    ttk::label $container.visualization.summary.vollbl -text "Pore volume:" -width 15
+    ttk::label $container.visualization.summary.volval -textvariable ::PETK::gui::calculatedVolume -width 15 -anchor w -relief sunken -background white
+    grid $container.visualization.summary.vollbl $container.visualization.summary.volval -sticky ew -pady 2
+
+    # Pore validity status
+    ttk::label $container.visualization.summary.validitylbl -text "Status:" -width 15
+    ttk::label $container.visualization.summary.validityval -textvariable ::PETK::gui::poreValidityStatus -width 15 -anchor w -relief sunken
+    grid $container.visualization.summary.validitylbl $container.visualization.summary.validityval -sticky ew -pady 2
+
+    # Update button
+    ttk::button $container.visualization.summary.update -text "Update Preview" -command {::PETK::gui::updatePoreVisualization}
+    grid $container.visualization.summary.update -sticky ew -pady "10 0"
+
+    # === ENHANCED RESIZE HANDLING ===
+    
+    # Bind resize events for proper canvas expansion
+    bind $tab1.canvas <Configure> [list ::PETK::gui::onCanvasConfigured $tab1.canvas $canvas_window]
+    bind $container <Configure> [list ::PETK::gui::onContentConfigured $tab1.canvas $canvas_window]
+    
+    # Store references for later use
+    set ::PETK::gui::mainCanvas $tab1.canvas
+    set ::PETK::gui::canvasWindow $canvas_window
+    set ::PETK::gui::contentContainer $container
+    
+    # Initialize variables and display
+    ::PETK::gui::updateMembraneTypeDisplay
+    ::PETK::gui::loadPoreImages
+    
+    # Force proper sizing after everything is created
+    after idle [list ::PETK::gui::forceInitialCanvasResize $tab1.canvas $canvas_window]
 }
 
 ####################################################
-## Tab1 Functions
+# Variable Initialization
 ####################################################
 
-proc ::PETK::gui::initialize {} {
-
-    # Initialize default project variables if they don't exist
-    if {![info exists ::PETK::gui::projectName]} {
-        set ::PETK::gui::projectName "PoreAnalysis"
+proc ::PETK::gui::initializeMembraneVariables {} {
+    # Initialize pore type
+    if {![info exists ::PETK::gui::membraneType]} {
+        set ::PETK::gui::membraneType "cylindrical"
     }
+    
+    # Initialize cylindrical parameters
+    if {![info exists ::PETK::gui::cylindricalDiameter]} {
+        set ::PETK::gui::cylindricalDiameter "200.0"
+    }
+    if {![info exists ::PETK::gui::cornerRadius]} {
+        set ::PETK::gui::cornerRadius "50.0"
+    }
+    
+    # Initialize double cone parameters
+    if {![info exists ::PETK::gui::innerDiameter]} {
+        set ::PETK::gui::innerDiameter "100.0"
+    }
+    if {![info exists ::PETK::gui::outerDiameter]} {
+        set ::PETK::gui::outerDiameter "300.0"
+    }
+    
+    # Initialize common parameters
+    if {![info exists ::PETK::gui::nanoporeThickness]} {
+        set ::PETK::gui::nanoporeThickness "200.0"
+    }
+    
+    # Initialize box dimensions
+    if {![info exists ::PETK::gui::autoCalculateBoxDimensions]} {
+        set ::PETK::gui::autoCalculateBoxDimensions 1
+    }
+    if {![info exists ::PETK::gui::boxSizeX]} {
+        set ::PETK::gui::boxSizeX "300.0"
+    }
+    if {![info exists ::PETK::gui::boxSizeY]} {
+        set ::PETK::gui::boxSizeY "300.0"
+    }
+    if {![info exists ::PETK::gui::boxSizeZ]} {
+        set ::PETK::gui::boxSizeZ "300.0"
+    }
+    if {![info exists ::PETK::gui::sysCutoff]} {
+        set ::PETK::gui::sysCutoff "50.0"
+    }
+    
+    # Initialize movement range for auto-calculation
+    if {![info exists ::PETK::gui::zStartRange]} {
+        set ::PETK::gui::zStartRange "150.0"
+    }
+    if {![info exists ::PETK::gui::zEndRange]} {
+        set ::PETK::gui::zEndRange "-150.0"
+    }
+    if {![info exists ::PETK::gui::zStep]} {
+        set ::PETK::gui::zStep "10.0"
+    }
+    if {![info exists ::PETK::gui::semPreviewFrames]} {
+        set ::PETK::gui::semPreviewFrames 5
+    }
+    
+    # Initialize auto-calculated box display
+    if {![info exists ::PETK::gui::autoBoxX]} {
+        set ::PETK::gui::autoBoxX ""
+    }
+    if {![info exists ::PETK::gui::autoBoxY]} {
+        set ::PETK::gui::autoBoxY ""
+    }
+    if {![info exists ::PETK::gui::autoBoxZ]} {
+        set ::PETK::gui::autoBoxZ ""
+    }
+    
+    # Initialize output settings
     if {![info exists ::PETK::gui::workdir]} {
-        set ::PETK::gui::workdir [pwd]
+        if {[info exists ::PETK::gui::workdir] && $::PETK::gui::workdir ne ""} {
+            set ::PETK::gui::workdir $::PETK::gui::workdir
+        } else {
+            set ::PETK::gui::workdir [pwd]
+        }
     }
-    if {![info exists ::PETK::gui::poreDiameter]} {
-        set ::PETK::gui::poreDiameter "200.0"
+    if {![info exists ::PETK::gui::outputPrefix]} {
+        set ::PETK::gui::outputPrefix "vertical_movement"
     }
-    if {![info exists ::PETK::gui::poreThickness]} {
-        set ::PETK::gui::poreThickness "200.0"
+    
+    # Initialize display variables
+    if {![info exists ::PETK::gui::currentPoreType]} {
+        set ::PETK::gui::currentPoreType "Cylindrical"
     }
+    if {![info exists ::PETK::gui::displayThickness]} {
+        set ::PETK::gui::displayThickness ""
+    }
+    if {![info exists ::PETK::gui::displayParam1]} {
+        set ::PETK::gui::displayParam1 ""
+    }
+    if {![info exists ::PETK::gui::displayParam2]} {
+        set ::PETK::gui::displayParam2 ""
+    }
+    if {![info exists ::PETK::gui::calculatedVolume]} {
+        set ::PETK::gui::calculatedVolume ""
+    }
+    if {![info exists ::PETK::gui::estimatedGridPoints]} {
+        set ::PETK::gui::estimatedGridPoints ""
+    }
+    
+    # Update display
+    ::PETK::gui::updateParameterDisplay
+    ::PETK::gui::calculateBoxDimensions
 }
 
 proc ::PETK::gui::selectWorkDir {} {
@@ -306,43 +453,1132 @@ proc ::PETK::gui::selectWorkDir {} {
     }
 }
 
-proc ::PETK::gui::browseAnalytePdb {} {
-    set pdbType { {{Protein Data Bank files} {.pdb}} {{All Files} *} }
-    set tempfile [tk_getOpenFile -title "Select Analyte PDB File" -multiple 0 -filetypes $pdbType]
-    if {![string eq $tempfile ""]} {
-        set ::PETK::gui::analytePDB $tempfile
+####################################################
+# Box Dimension Management Functions
+####################################################
+proc ::PETK::gui::toggleBoxDimensionMode {} {
+    set container $::PETK::gui::window.hlf.nb.tab1.canvas.content
+    
+    # Hide both frames first
+    catch {grid forget $container.boxdim.manual}
+    catch {grid forget $container.boxdim.auto_display}
+    
+    if {$::PETK::gui::autoCalculateBoxDimensions} {
+        # Show auto-calculated display
+        grid $container.boxdim.auto_display -row 1 -column 0 -columnspan 6 -sticky ew
+        ::PETK::gui::calculateBoxDimensions
+        ::PETK::gui::updateMembraneStatus "Switched to auto-calculated box dimensions"
+    } else {
+        # Show manual input fields
+        grid $container.boxdim.manual -row 1 -column 0 -columnspan 6 -sticky ew
+        ::PETK::gui::updateMembraneStatus "Switched to manual box dimensions"
     }
 }
 
-proc ::PETK::gui::newProject {} {
-    ::PETK::initialize_gui 
-}
-
-proc ::PETK::initialize_gui {} {
-
-    # Now, we have Prefs options for OS X only
-    if {[string eq "Darwin" $::tcl_platform(os)]} {
-        set ::PETK::gui::showadvanced 1
+proc ::PETK::gui::calculateBoxDimensions {} {
+    if {!$::PETK::gui::autoCalculateBoxDimensions} {
+        return
     }
-
-    ### Tab 1 
-    set ::PETK::gui::analytePDB ""
-    set ::PETK::gui::analyteSelection "all"
-    set ::PETK::gui::analyteMol ""
-    set ::PETK::gui::analyteDiameter ""
-    set ::PETK::gui::analyteVolume ""
-    set ::PETK::gui::fitStatus ""
-    set ::PETK::gui::analyteDistance ""
-    set ::PETK::gui::leftmostAtom ""
-    set ::PETK::gui::rightmostAtom ""
-
+    
+    # Get pore radius based on type
+    set pore_radius 0.0
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        if {[string is double $::PETK::gui::cylindricalDiameter]} {
+            set pore_radius [expr {$::PETK::gui::cylindricalDiameter / 2.0}]
+        }
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        if {[string is double $::PETK::gui::outerDiameter]} {
+            set pore_radius [expr {$::PETK::gui::outerDiameter / 2.0}]
+        }
+    }
+    
+    # Calculate XY dimensions based on pore size and padding
+    set padding $::PETK::gui::sysCutoff
+    set xy_size [expr {max(0.0, $pore_radius + 50.0 + $padding)}]
+    
+    # Calculate Z dimensions based on movement range and membrane
+    set membrane_half_thickness 0.0
+    if {[string is double $::PETK::gui::nanoporeThickness]} {
+        set membrane_half_thickness [expr {$::PETK::gui::nanoporeThickness / 2.0}]
+    }
+    
+    set z_start 0.0
+    set z_end 0.0
+    if {[string is double $::PETK::gui::zStartRange]} {
+        set z_start $::PETK::gui::zStartRange
+    }
+    if {[string is double $::PETK::gui::zEndRange]} {
+        set z_end $::PETK::gui::zEndRange
+    }
+    
+    set z_min [expr {min(-$membrane_half_thickness, $z_end)}]
+    set z_max [expr {max($membrane_half_thickness, $z_start)}]
+    
+    # Update display variables
+    set ::PETK::gui::autoBoxX [format "%.1f to %.1f (%.1f)" [expr {-$xy_size}] $xy_size [expr {2*$xy_size}]]
+    set ::PETK::gui::autoBoxY [format "%.1f to %.1f (%.1f)" [expr {-$xy_size}] $xy_size [expr {2*$xy_size}]]
+    set ::PETK::gui::autoBoxZ [format "%.1f to %.1f (%.1f)" $z_min $z_max [expr {$z_max - $z_min + $padding}]]
+    
+    # Store actual values for calculations
+    set ::PETK::gui::calculatedBoxSizeX [expr {2*$xy_size}]
+    set ::PETK::gui::calculatedBoxSizeY [expr {2*$xy_size}]
+    set ::PETK::gui::calculatedBoxSizeZ [expr {$z_max - $z_min}]
+        
+    puts "Auto-calculated box dimensions:"
+    puts "  X: -$xy_size to $xy_size Å"
+    puts "  Y: -$xy_size to $xy_size Å"
+    puts "  Z: $z_min to $z_max Å"
+    puts "  Pore radius: $pore_radius Å"
+    puts "  Movement range: $z_end to $z_start Å"
 }
 
 ####################################################
-### Initialize Result Variables
+# Pore Type Management Functions
+####################################################
+
+proc ::PETK::gui::updateMembraneTypeDisplay {} {
+    set container $::PETK::gui::window.hlf.nb.tab1.canvas.content
+    
+    # Hide all parameter frames first
+    catch {grid forget $container.params.cyl}
+    catch {grid forget $container.params.cone}
+    
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        grid $container.params.cyl -row 1 -column 0 -columnspan 6 -sticky ew -pady 5
+        set ::PETK::gui::currentPoreType "Cylindrical"
+        ::PETK::gui::updateMembraneStatus "Switched to cylindrical pore mode"
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        grid $container.params.cone -row 1 -column 0 -columnspan 6 -sticky ew -pady 5
+        set ::PETK::gui::currentPoreType "Double Cone"
+        ::PETK::gui::updateMembraneStatus "Switched to double cone pore mode"
+    }
+    
+    ::PETK::gui::updateParameterDisplay
+    ::PETK::gui::updatePoreVisualization
+    ::PETK::gui::calculateBoxDimensions
+}
+
+proc ::PETK::gui::updateParameterDisplay {} {
+    set ::PETK::gui::displayThickness "$::PETK::gui::nanoporeThickness Å"
+    
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        set ::PETK::gui::displayParam1 "Diameter: $::PETK::gui::cylindricalDiameter Å"
+        set ::PETK::gui::displayParam2 "Corner R: $::PETK::gui::cornerRadius Å"
+        
+        # Calculate cylindrical volume
+        if {[string is double $::PETK::gui::cylindricalDiameter] && [string is double $::PETK::gui::nanoporeThickness]} {
+            set radius [expr {$::PETK::gui::cylindricalDiameter / 2.0}]
+            set height $::PETK::gui::nanoporeThickness
+            set volume [expr {3.14159 * $radius * $radius * $height}]
+            set ::PETK::gui::calculatedVolume [format "%.1f Å³" $volume]
+        } else {
+            set ::PETK::gui::calculatedVolume "Invalid params"
+        }
+        
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        set ::PETK::gui::displayParam1 "Inner: $::PETK::gui::innerDiameter Å"
+        set ::PETK::gui::displayParam2 "Outer: $::PETK::gui::outerDiameter Å"
+        
+        # Calculate double cone volume (approximation)
+        if {[string is double $::PETK::gui::innerDiameter] && [string is double $::PETK::gui::outerDiameter] && [string is double $::PETK::gui::nanoporeThickness]} {
+            set r1 [expr {$::PETK::gui::innerDiameter / 2.0}]
+            set r2 [expr {$::PETK::gui::outerDiameter / 2.0}]
+            set h [expr {$::PETK::gui::nanoporeThickness / 2.0}]
+            # Volume of truncated cone: π/3 * h * (r1² + r1*r2 + r2²)
+            set volume [expr {3.14159/3.0 * $h * ($r1*$r1 + $r1*$r2 + $r2*$r2) * 2}]
+            set ::PETK::gui::calculatedVolume [format "%.1f Å³" $volume]
+        } else {
+            set ::PETK::gui::calculatedVolume "Invalid params"
+        }
+    }
+    
+    # Update box dimensions and grid points
+    ::PETK::gui::calculateBoxDimensions
+}
+
+####################################################
+# Image Loading and Visualization Functions
+####################################################
+
+proc ::PETK::gui::loadPoreImages {} {
+    # Load pore shape images
+    set ::PETK::gui::poreImages(cylindrical) ""
+    set ::PETK::gui::poreImages(doublecone) ""
+    
+    # Try to load cylindrical pore image
+    set cyl_path "./shapes/shape2.gif"
+    if {[file exists $cyl_path]} {
+        if {[catch {
+            set ::PETK::gui::poreImages(cylindrical) [image create photo -file $cyl_path]
+        } error]} {
+            puts "Warning: Could not load cylindrical pore image: $error"
+        }
+    } else {
+        puts "Warning: Cylindrical pore image not found at: $cyl_path"
+    }
+    
+    # Try to load double cone pore image
+    set cone_path "./shapes/shape1.gif"
+    if {[file exists $cone_path]} {
+        if {[catch {
+            set ::PETK::gui::poreImages(doublecone) [image create photo -file $cone_path]
+        } error]} {
+            puts "Warning: Could not load double cone pore image: $error"
+        }
+    } else {
+        puts "Warning: Double cone pore image not found at: $cone_path"
+    }
+    
+    # Load initial image
+    ::PETK::gui::updatePoreVisualization
+}
+
+proc ::PETK::gui::updatePoreVisualization {} {
+    if {![info exists ::PETK::gui::poreImageCanvas] || ![winfo exists $::PETK::gui::poreImageCanvas]} {
+        return
+    }
+    
+    set canvas $::PETK::gui::poreImageCanvas
+    
+    # Clear previous image
+    $canvas delete all
+    
+    # Get current pore type image
+    set image_key $::PETK::gui::membraneType
+    
+    if {[info exists ::PETK::gui::poreImages($image_key)] && $::PETK::gui::poreImages($image_key) ne ""} {
+        set image $::PETK::gui::poreImages($image_key)
+        
+        # Get canvas and image dimensions
+        set canvas_width [winfo reqwidth $canvas]
+        set canvas_height [winfo reqheight $canvas]
+        if {$canvas_width <= 1} {set canvas_width 300}
+        if {$canvas_height <= 1} {set canvas_height 250}
+        
+        set img_width [image width $image]
+        set img_height [image height $image]
+        
+        # Calculate scaling to fit canvas while maintaining aspect ratio
+        set scale_x [expr {double($canvas_width) / $img_width}]
+        set scale_y [expr {double($canvas_height) / $img_height}]
+        set scale [expr {min($scale_x, $scale_y) * 0.8}]  ; # 80% of canvas size
+        
+        # Create scaled image if needed
+        if {$scale < 1.0} {
+            set new_width [expr {int($img_width * $scale)}]
+            set new_height [expr {int($img_height * $scale)}]
+            
+            set scaled_image [image create photo]
+            $scaled_image copy $image -subsample [expr {int(1.0/$scale)}]
+            
+            # Center the image on canvas
+            set x [expr {($canvas_width - $new_width) / 2}]
+            set y [expr {($canvas_height - $new_height) / 2}]
+            $canvas create image $x $y -anchor nw -image $scaled_image
+        } else {
+            # Center the original image
+            set x [expr {($canvas_width - $img_width) / 2}]
+            set y [expr {($canvas_height - $img_height) / 2}]
+            $canvas create image $x $y -anchor nw -image $image
+        }
+        
+    } else {
+        # Draw a simple schematic if no image available
+        ::PETK::gui::drawPoreSchematic $canvas
+    }
+    
+    # Add parameter labels on the image
+    # ::PETK::gui::addParameterLabels $canvas
+    ::PETK::gui::updateParameterDisplay
+    ::PETK::gui::updatePoreVmdVisualization 
+}
+
+proc ::PETK::gui::drawPoreSchematic {canvas} {
+    set width [winfo reqwidth $canvas]
+    set height [winfo reqheight $canvas]
+    if {$width <= 1} {set width 300}
+    if {$height <= 1} {set height 250}
+    
+    set cx [expr {$width / 2}]
+    set cy [expr {$height / 2}]
+    
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        # Draw cylindrical pore schematic
+        # Membrane (gray rectangles)
+        $canvas create rectangle 20 [expr {$cy-40}] [expr {$cx-30}] [expr {$cy+40}] -fill gray70 -outline black
+        $canvas create rectangle [expr {$cx+30}] [expr {$cy-40}] [expr {$width-20}] [expr {$cy+40}] -fill gray70 -outline black
+        
+        # Pore (white rectangle)
+        $canvas create rectangle [expr {$cx-30}] [expr {$cy-40}] [expr {$cx+30}] [expr {$cy+40}] -fill white -outline black
+        
+        # Labels
+        $canvas create text $cx [expr {$cy-60}] -text "Cylindrical Pore" -font {TkDefaultFont 10 bold}
+        $canvas create text 60 [expr {$cy-60}] -text "Membrane" -font {TkDefaultFont 9}
+        
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        # Draw double cone pore schematic
+        # Membrane (gray rectangles)
+        $canvas create rectangle 20 [expr {$cy-40}] [expr {$cx-40}] [expr {$cy+40}] -fill gray70 -outline black
+        $canvas create rectangle [expr {$cx+40}] [expr {$cy-40}] [expr {$width-20}] [expr {$cy+40}] -fill gray70 -outline black
+        
+        # Double cone pore (trapezoid)
+        set coords [list [expr {$cx-40}] [expr {$cy-40}] \
+                         [expr {$cx-15}] $cy \
+                         [expr {$cx-40}] [expr {$cy+40}] \
+                         [expr {$cx+40}] [expr {$cy+40}] \
+                         [expr {$cx+15}] $cy \
+                         [expr {$cx+40}] [expr {$cy-40}]]
+        $canvas create polygon $coords -fill white -outline black
+        
+        # Labels
+        $canvas create text $cx [expr {$cy-60}] -text "Double Cone Pore" -font {TkDefaultFont 10 bold}
+        $canvas create text 60 [expr {$cy-60}] -text "Membrane" -font {TkDefaultFont 9}
+    }
+}
+
+proc ::PETK::gui::addParameterLabels {canvas} {
+    set width [winfo reqwidth $canvas]
+    set height [winfo reqheight $canvas]
+    if {$width <= 1} {set width 300}
+    if {$height <= 1} {set height 250}
+    
+    # Add parameter annotations on the visualization
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        $canvas create text [expr {$width-10}] 20 -text "D = $::PETK::gui::cylindricalDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+        $canvas create text [expr {$width-10}] 35 -text "R = $::PETK::gui::cornerRadius Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+        $canvas create text [expr {$width-10}] 50 -text "T = $::PETK::gui::nanoporeThickness Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        $canvas create text [expr {$width-10}] 20 -text "Inner = $::PETK::gui::innerDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+        $canvas create text [expr {$width-10}] 35 -text "Outer = $::PETK::gui::outerDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+        $canvas create text [expr {$width-10}] 50 -text "T = $::PETK::gui::nanoporeThickness Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+    }
+}
+
+proc ::PETK::gui::updateMembraneStatus {message} {
+    if {[info exists ::PETK::gui::membraneStatusLabel] && [winfo exists $::PETK::gui::membraneStatusLabel]} {
+        $::PETK::gui::membraneStatusLabel configure -text $message
+        update
+    }
+    puts "PETK Membrane Status: $message"
+}
+
+
+
+proc ::PETK::gui::updatePoreVmdVisualization {} {
+    # Clear any existing graphics
+    draw delete all
+    
+    # Debug: Print current parameter values
+    # puts "=== VMD Visualization Debug ==="
+    # puts "autoCalculateBoxDimensions: $::PETK::gui::autoCalculateBoxDimensions"
+    # if {$::PETK::gui::autoCalculateBoxDimensions} {
+    #    puts "autoBoxX: '$::PETK::gui::autoBoxX'"
+    #    puts "autoBoxY: '$::PETK::gui::autoBoxY'"
+    #    puts "autoBoxZ: '$::PETK::gui::autoBoxZ'"
+    #} else {
+    #    puts "boxSizeX: $::PETK::gui::boxSizeX"
+    #    puts "boxSizeY: $::PETK::gui::boxSizeY" 
+    #    puts "boxSizeZ: $::PETK::gui::boxSizeZ"
+    #}
+    #puts "membraneType: $::PETK::gui::membraneType"
+    #puts "nanoporeThickness: $::PETK::gui::nanoporeThickness"
+    #if {$::PETK::gui::membraneType eq "cylindrical"} {
+    #    puts "cylindricalDiameter: $::PETK::gui::cylindricalDiameter"
+    #    if {[info exists ::PETK::gui::cornerRadius]} {
+    #        puts "cornerRadius: $::PETK::gui::cornerRadius"
+    #    }
+    #} else {
+    #    puts "innerDiameter: $::PETK::gui::innerDiameter"
+    #    puts "outerDiameter: $::PETK::gui::outerDiameter"
+    #}
+    #puts "=============================="
+    
+    # Get box dimensions based on current mode
+    if {$::PETK::gui::autoCalculateBoxDimensions} {
+        # Try different parsing approaches for auto-calculated dimensions
+        if {[catch {
+            # Method 1: Extract size from parentheses - format: "min to max (size)"
+            regexp {\(([0-9.-]+)\)} $::PETK::gui::autoBoxX xbox_match xbox
+            regexp {\(([0-9.-]+)\)} $::PETK::gui::autoBoxY ybox_match ybox  
+            regexp {\(([0-9.-]+)\)} $::PETK::gui::autoBoxZ zbox_match zbox
+            puts "Parsed box dimensions: $xbox x $ybox x $zbox"
+        } error]} {
+            puts "Error parsing auto dimensions: $error"
+            # Fallback to manual dimensions if auto parsing fails
+            set xbox $::PETK::gui::boxSizeX
+            set ybox $::PETK::gui::boxSizeY
+            set zbox $::PETK::gui::boxSizeZ
+            puts "Using fallback manual dimensions: $xbox x $ybox x $zbox"
+        }
+    } else {
+        # Use manual dimensions
+        set xbox $::PETK::gui::boxSizeX
+        set ybox $::PETK::gui::boxSizeY
+        set zbox $::PETK::gui::boxSizeZ
+        puts "Using manual dimensions: $xbox x $ybox x $zbox"
+    }
+    
+    # Validate dimensions
+    if {![string is double $xbox] || ![string is double $ybox] || ![string is double $zbox] || 
+        $xbox <= 0 || $ybox <= 0 || $zbox <= 0} {
+        puts "ERROR: Invalid box dimensions - xbox:$xbox ybox:$ybox zbox:$zbox"
+        set ::PETK::gui::poreValidityStatus "INVALID - Invalid box dimensions"
+        return
+    }
+    
+    # Perform comprehensive pore validation using the new validation system
+    set validation_status [::PETK::gui::updatePoreValidityStatus $xbox $ybox $zbox]
+    
+    # Calculate box center and boundaries
+    set center_x [expr $xbox / 2.0]
+    set center_y [expr $ybox / 2.0]
+    set center_z [expr $zbox / 2.0]
+    
+    set min_x [expr -$center_x]
+    set max_x [expr $center_x]
+    set min_y [expr -$center_y]
+    set max_y [expr $center_y]
+    set min_z [expr -$center_z]
+    set max_z [expr $center_z]
+    
+    # Draw simulation box outline
+    draw color cyan
+    draw material Transparent
+    
+    # Bottom face
+    draw line [list $min_x $min_y $min_z] [list $max_x $min_y $min_z]
+    draw line [list $max_x $min_y $min_z] [list $max_x $max_y $min_z]
+    draw line [list $max_x $max_y $min_z] [list $min_x $max_y $min_z]
+    draw line [list $min_x $max_y $min_z] [list $min_x $min_y $min_z]
+    
+    # Top face
+    draw line [list $min_x $min_y $max_z] [list $max_x $min_y $max_z]
+    draw line [list $max_x $min_y $max_z] [list $max_x $max_y $max_z]
+    draw line [list $max_x $max_y $max_z] [list $min_x $max_y $max_z]
+    draw line [list $min_x $max_y $max_z] [list $min_x $min_y $max_z]
+    
+    # Vertical edges
+    draw line [list $min_x $min_y $min_z] [list $min_x $min_y $max_z]
+    draw line [list $max_x $min_y $min_z] [list $max_x $min_y $max_z]
+    draw line [list $max_x $max_y $min_z] [list $max_x $max_y $max_z]
+    draw line [list $min_x $max_y $min_z] [list $min_x $max_y $max_z]
+    
+    # Get nanopore parameters
+    set thickness $::PETK::gui::nanoporeThickness
+    set membrane_half_thickness [expr $thickness / 2.0]
+    set pore_center_z 0.0  ; # Center the pore in Z direction
+    set pore_start_z [expr $pore_center_z - $membrane_half_thickness]
+    set pore_end_z [expr $pore_center_z + $membrane_half_thickness]
+    
+    # Draw membrane extending to box edges with pore as a hole
+    draw color purple
+    draw material Opaque
+    
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        # Get pore parameters
+        set pore_radius [expr $::PETK::gui::cylindricalDiameter / 2.0]
+        
+        # Check if corner radius is defined and > 0 for chamfered edges
+        set has_corner_radius [expr {[info exists ::PETK::gui::cornerRadius] && $::PETK::gui::cornerRadius > 0}]
+        if {$has_corner_radius} {
+            set corner_radius $::PETK::gui::cornerRadius
+            set edge_radius [expr $pore_radius + $corner_radius]
+            set chamfer_depth $corner_radius  ; # Default chamfer depth
+            puts "Using corner radius: $corner_radius, edge radius: $edge_radius"
+        } else {
+            puts "No corner radius specified, using regular cylindrical pore"
+        }
+        
+        # Add visual warning if configuration is invalid
+        if {[string match "*INVALID*" $::PETK::gui::poreValidityStatus]} {
+            draw color red
+            draw material Transparent
+            # Draw warning outline around the problematic area
+            set warn_radius [expr $pore_radius + 10.0]
+            if {$has_corner_radius} {
+                set warn_radius [expr $edge_radius + 10.0]
+            }
+            
+            for {set angle 0} {$angle < 360} {incr angle 30} {
+                set angle_rad [expr $angle * 3.14159 / 180.0]
+                set next_angle_rad [expr ($angle + 30) * 3.14159 / 180.0]
+                set x1 [expr $warn_radius * cos($angle_rad)]
+                set y1 [expr $warn_radius * sin($angle_rad)]
+                set x2 [expr $warn_radius * cos($next_angle_rad)]
+                set y2 [expr $warn_radius * sin($next_angle_rad)]
+                
+                draw line [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z]
+                draw line [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z]
+            }
+            
+            # Reset to purple for membrane drawing
+            draw color purple
+            draw material Opaque
+        }
+        
+        # Draw membrane as rectangular sheets with hole
+        set grid_size 5.0  ; # Grid spacing for membrane representation
+        
+        # Draw membrane in XY plane at multiple Z levels to show chamfer effect
+        set z_levels 10  ; # Number of Z levels to draw for chamfer visualization
+        
+        for {set z_level 0} {$z_level < $z_levels} {incr z_level} {
+            # Calculate Z position for this level
+            set z_frac [expr double($z_level) / ($z_levels - 1)]  ; # 0 to 1
+            set z_pos [expr $pore_start_z + $z_frac * $thickness]
+            
+            # Calculate local pore radius at this Z level
+            if {$has_corner_radius} {
+                # Distance from membrane edges
+                set z_edge_dist [expr $membrane_half_thickness - abs($z_pos)]
+                
+                # Apply chamfer only within chamfer_depth from edges
+                if {$z_edge_dist < $chamfer_depth} {
+                    # Linear interpolation in chamfer zone
+                    set chamfer_progress [expr $z_edge_dist / $chamfer_depth]
+                    set chamfer_progress [expr max(0.0, min(1.0, $chamfer_progress))]
+                    set local_pore_radius [expr $edge_radius + ($pore_radius - $edge_radius) * $chamfer_progress]
+                } else {
+                    set local_pore_radius $pore_radius
+                }
+            } else {
+                set local_pore_radius $pore_radius
+            }
+            
+            # Draw membrane grid at this Z level
+            for {set x $min_x} {$x < $max_x} {set x [expr $x + $grid_size]} {
+                for {set y $min_y} {$y < $max_y} {set y [expr $y + $grid_size]} {
+                    
+                    # Calculate grid cell boundaries, ensuring they don't exceed box limits
+                    set x1 $x
+                    set x2 [expr min($x + $grid_size, $max_x)]
+                    set y1 $y
+                    set y2 [expr min($y + $grid_size, $max_y)]
+                    
+                    # Check if this grid cell is outside the pore area
+                    set cell_center_x [expr ($x1 + $x2) / 2.0]
+                    set cell_center_y [expr ($y1 + $y2) / 2.0]
+                    set distance [expr sqrt($cell_center_x*$cell_center_x + $cell_center_y*$cell_center_y)]
+                    
+                    # Only draw if cell center is outside local pore radius
+                    if {$distance > $local_pore_radius} {
+                        # Draw only at top and bottom for cleaner visualization
+                        if {$z_level == 0} {
+                            # Bottom face
+                            draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z]
+                            draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z] [list $x1 $y2 $pore_start_z]
+                        } elseif {$z_level == [expr $z_levels - 1]} {
+                            # Top face
+                            draw triangle [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z] [list $x2 $y1 $pore_end_z]
+                            draw triangle [list $x1 $y1 $pore_end_z] [list $x1 $y2 $pore_end_z] [list $x2 $y2 $pore_end_z]
+                        }
+                    }
+                }
+            }
+        }
+        
+        # Draw pore outline to show the hole and chamfer effect
+        draw color yellow
+        set angle_step 15
+        
+        # If we have corner radius, draw multiple circles at different Z levels
+        if {$has_corner_radius} {
+            set outline_z_levels 5  ; # Fewer levels for outline
+            for {set z_level 0} {$z_level < $outline_z_levels} {incr z_level} {
+                set z_frac [expr double($z_level) / ($outline_z_levels - 1)]
+                set z_pos [expr $pore_start_z + $z_frac * $thickness]
+                
+                # Calculate local pore radius at this Z level
+                set z_edge_dist [expr $membrane_half_thickness - abs($z_pos)]
+                if {$z_edge_dist < $chamfer_depth} {
+                    set chamfer_progress [expr $z_edge_dist / $chamfer_depth]
+                    set chamfer_progress [expr max(0.0, min(1.0, $chamfer_progress))]
+                    set local_pore_radius [expr $edge_radius + ($pore_radius - $edge_radius) * $chamfer_progress]
+                } else {
+                    set local_pore_radius $pore_radius
+                }
+                
+                # Draw circle at this Z level
+                for {set angle 0} {$angle < 360} {incr angle $angle_step} {
+                    set angle_rad [expr $angle * 3.14159 / 180.0]
+                    set next_angle_rad [expr ($angle + $angle_step) * 3.14159 / 180.0]
+                    set x1 [expr $local_pore_radius * cos($angle_rad)]
+                    set y1 [expr $local_pore_radius * sin($angle_rad)]
+                    set x2 [expr $local_pore_radius * cos($next_angle_rad)]
+                    set y2 [expr $local_pore_radius * sin($next_angle_rad)]
+                    
+                    draw line [list $x1 $y1 $z_pos] [list $x2 $y2 $z_pos]
+                }
+                
+                # Draw connecting lines between levels
+                if {$z_level < [expr $outline_z_levels - 1]} {
+                    set next_z_frac [expr double($z_level + 1) / ($outline_z_levels - 1)]
+                    set next_z_pos [expr $pore_start_z + $next_z_frac * $thickness]
+                    
+                    for {set angle 0} {$angle < 360} {incr angle [expr $angle_step * 2]} {
+                        set angle_rad [expr $angle * 3.14159 / 180.0]
+                        set x1 [expr $local_pore_radius * cos($angle_rad)]
+                        set y1 [expr $local_pore_radius * sin($angle_rad)]
+                        
+                        # Calculate radius at next level
+                        set next_z_edge_dist [expr $membrane_half_thickness - abs($next_z_pos)]
+                        if {$next_z_edge_dist < $chamfer_depth} {
+                            set next_chamfer_progress [expr $next_z_edge_dist / $chamfer_depth]
+                            set next_chamfer_progress [expr max(0.0, min(1.0, $next_chamfer_progress))]
+                            set next_local_pore_radius [expr $edge_radius + ($pore_radius - $edge_radius) * $next_chamfer_progress]
+                        } else {
+                            set next_local_pore_radius $pore_radius
+                        }
+                        
+                        set x2 [expr $next_local_pore_radius * cos($angle_rad)]
+                        set y2 [expr $next_local_pore_radius * sin($angle_rad)]
+                        
+                        draw line [list $x1 $y1 $z_pos] [list $x2 $y2 $next_z_pos]
+                    }
+                }
+            }
+        } else {
+            # Regular cylindrical pore - draw simple circles
+            for {set angle 0} {$angle < 360} {incr angle $angle_step} {
+                set angle_rad [expr $angle * 3.14159 / 180.0]
+                set next_angle_rad [expr ($angle + $angle_step) * 3.14159 / 180.0]
+                set x1 [expr $pore_radius * cos($angle_rad)]
+                set y1 [expr $pore_radius * sin($angle_rad)]
+                set x2 [expr $pore_radius * cos($next_angle_rad)]
+                set y2 [expr $pore_radius * sin($next_angle_rad)]
+                
+                draw line [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z]
+                draw line [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z]
+                draw line [list $x1 $y1 $pore_start_z] [list $x1 $y1 $pore_end_z]
+            }
+        }
+        
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        # Draw membrane with double cone pore hole
+        set inner_radius [expr $::PETK::gui::innerDiameter / 2.0]
+        set outer_radius [expr $::PETK::gui::outerDiameter / 2.0]
+        set middle_z $pore_center_z
+        
+        # Add visual warning if configuration is invalid
+        if {[string match "*INVALID*" $::PETK::gui::poreValidityStatus]} {
+            draw color red
+            draw material Transparent
+            # Draw warning outline around the problematic area
+            set warn_radius [expr $outer_radius + 10.0]
+            
+            for {set angle 0} {$angle < 360} {incr angle 30} {
+                set angle_rad [expr $angle * 3.14159 / 180.0]
+                set next_angle_rad [expr ($angle + 30) * 3.14159 / 180.0]
+                set x1 [expr $warn_radius * cos($angle_rad)]
+                set y1 [expr $warn_radius * sin($angle_rad)]
+                set x2 [expr $warn_radius * cos($next_angle_rad)]
+                set y2 [expr $warn_radius * sin($next_angle_rad)]
+                
+                draw line [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z]
+                draw line [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z]
+            }
+            
+            # Reset to purple for membrane drawing
+            draw color purple
+            draw material Opaque
+        }
+        
+        # Draw membrane as rectangular sheets with cone-shaped hole
+        set grid_size 5.0
+        
+        # Draw membrane exactly within box boundaries
+        for {set x $min_x} {$x < $max_x} {set x [expr $x + $grid_size]} {
+            for {set y $min_y} {$y < $max_y} {set y [expr $y + $grid_size]} {
+                
+                # Calculate grid cell boundaries, ensuring they don't exceed box limits
+                set x1 $x
+                set x2 [expr min($x + $grid_size, $max_x)]
+                set y1 $y
+                set y2 [expr min($y + $grid_size, $max_y)]
+                
+                # Check if this grid cell is outside the pore area
+                set cell_center_x [expr ($x1 + $x2) / 2.0]
+                set cell_center_y [expr ($y1 + $y2) / 2.0]
+                set distance [expr sqrt($cell_center_x*$cell_center_x + $cell_center_y*$cell_center_y)]
+                
+                # Only draw if cell center is outside the outer pore radius
+                if {$distance > $outer_radius} {
+                    # Draw top and bottom membrane faces
+                    draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z]
+                    draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z] [list $x1 $y2 $pore_start_z]
+                    draw triangle [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z] [list $x2 $y1 $pore_end_z]
+                    draw triangle [list $x1 $y1 $pore_end_z] [list $x1 $y2 $pore_end_z] [list $x2 $y2 $pore_end_z]
+                }
+            }
+        }
+        
+        # Draw pore outline to show the double cone hole
+        draw color yellow
+        for {set angle 0} {$angle < 360} {incr angle 20} {
+            set angle_rad [expr $angle * 3.14159 / 180.0]
+            set next_angle_rad [expr ($angle + 20) * 3.14159 / 180.0]
+            
+            # Outer radius points
+            set x1_out [expr $outer_radius * cos($angle_rad)]
+            set y1_out [expr $outer_radius * sin($angle_rad)]
+            set x2_out [expr $outer_radius * cos($next_angle_rad)]
+            set y2_out [expr $outer_radius * sin($next_angle_rad)]
+            
+            # Inner radius points  
+            set x1_in [expr $inner_radius * cos($angle_rad)]
+            set y1_in [expr $inner_radius * sin($angle_rad)]
+            set x2_in [expr $inner_radius * cos($next_angle_rad)]
+            set y2_in [expr $inner_radius * sin($next_angle_rad)]
+            
+            # Draw cone outline
+            draw line [list $x1_out $y1_out $pore_start_z] [list $x2_out $y2_out $pore_start_z]
+            draw line [list $x1_in $y1_in $middle_z] [list $x2_in $y2_in $middle_z]
+            draw line [list $x1_out $y1_out $pore_start_z] [list $x1_in $y1_in $middle_z]
+            draw line [list $x1_in $y1_in $middle_z] [list $x1_out $y1_out $pore_end_z]
+            draw line [list $x1_out $y1_out $pore_end_z] [list $x2_out $y2_out $pore_end_z]
+        }
+    }
+    
+    # Final status message
+    if {[string match "*INVALID*" $::PETK::gui::poreValidityStatus]} {
+        puts "Pore visualization completed - WARNING: INVALID CONFIGURATION!"
+        puts "See detailed validation report above."
+    } else {
+        if {$::PETK::gui::membraneType eq "cylindrical" && [info exists ::PETK::gui::cornerRadius] && $::PETK::gui::cornerRadius > 0} {
+            puts "Pore visualization completed for chamfered cylindrical pore (corner radius: $::PETK::gui::cornerRadius) with purple membrane"
+        } else {
+            puts "Pore visualization completed for $::PETK::gui::membraneType pore with purple membrane"
+        }
+    }
+    
+    puts "Current validity status: $::PETK::gui::poreValidityStatus"
+}
+
+proc ::PETK::gui::updatePoreDiameter {} {
+    
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        # For cylindrical pores, use the cylindrical diameter
+        if {[info exists ::PETK::gui::cylindricalDiameter] && 
+            [string is double $::PETK::gui::cylindricalDiameter] && 
+            $::PETK::gui::cylindricalDiameter > 0} {
+            set ::PETK::gui::poreDiameter $::PETK::gui::cylindricalDiameter
+            puts "Pore diameter set to cylindrical diameter: $::PETK::gui::poreDiameter Å"
+        } else {
+            set ::PETK::gui::poreDiameter ""
+            puts "Warning: Invalid or missing cylindrical diameter"
+        }
+        
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        # For double cone pores, use the smaller of inner and outer diameters
+        if {[info exists ::PETK::gui::innerDiameter] && 
+            [info exists ::PETK::gui::outerDiameter] &&
+            [string is double $::PETK::gui::innerDiameter] && 
+            [string is double $::PETK::gui::outerDiameter] &&
+            $::PETK::gui::innerDiameter > 0 && 
+            $::PETK::gui::outerDiameter > 0} {
+            
+            # Set to the minimum of inner and outer diameters
+            if {$::PETK::gui::innerDiameter <= $::PETK::gui::outerDiameter} {
+                set ::PETK::gui::poreDiameter $::PETK::gui::innerDiameter
+                puts "Pore diameter set to inner diameter (smaller): $::PETK::gui::poreDiameter Å"
+            } else {
+                set ::PETK::gui::poreDiameter $::PETK::gui::outerDiameter
+                puts "Pore diameter set to outer diameter (smaller): $::PETK::gui::poreDiameter Å"
+            }
+        } else {
+            set ::PETK::gui::poreDiameter ""
+            puts "Warning: Invalid or missing inner/outer diameters"
+        }
+        
+    } else {
+        # Unknown membrane type
+        set ::PETK::gui::poreDiameter ""
+        puts "Warning: Unknown membrane type: $::PETK::gui::membraneType"
+    }
+    
+    # Trigger any dependent updates (like fit status)
+    if {[info exists ::PETK::gui::poreDiameter] && $::PETK::gui::poreDiameter ne ""} {
+        # Call fit status update if it exists
+        if {[info procs ::PETK::gui::updateFitStatus] ne ""} {
+            after idle ::PETK::gui::updateFitStatus
+        }
+    }
+}
+
+proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
+    
+    set validation_messages {}
+    set is_valid 1
+    set critical_errors {}
+    set warnings {}
+    
+    # Calculate box half-dimensions for radial checks
+    set box_half_x [expr $xbox / 2.0]
+    set box_half_y [expr $ybox / 2.0] 
+    set box_half_z [expr $zbox / 2.0]
+    set min_box_half_xy [expr min($box_half_x, $box_half_y)]
+    
+    # Get pore parameters
+    set thickness $::PETK::gui::nanoporeThickness
+    set membrane_half_thickness [expr $thickness / 2.0]
+    
+    # 1. THICKNESS VALIDATION - Check against Z dimension
+    if {$thickness > $zbox} {
+        set is_valid 0
+        lappend critical_errors "Membrane thickness ($thickness Å) > box Z dimension ($zbox Å)"
+        lappend critical_errors "  Membrane completely fills or exceeds the box height"
+        lappend critical_errors "  Required: thickness < $zbox Å"
+    } elseif {$thickness > [expr 0.8 * $zbox]} {
+        lappend warnings "Membrane thickness ($thickness Å) > 80% of box Z dimension ($zbox Å)"
+        lappend warnings "  Consider increasing box height for better simulation"
+    }
+    
+    # 2. PORE TYPE SPECIFIC VALIDATIONS
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        set pore_radius [expr $::PETK::gui::cylindricalDiameter / 2.0]
+        
+        # Check basic pore radius
+        if {$pore_radius > $min_box_half_xy} {
+            set is_valid 0
+            lappend critical_errors "Pore radius ($pore_radius Å) > minimum box half-dimension ($min_box_half_xy Å)"
+            lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
+            lappend critical_errors "  Required: pore radius < $min_box_half_xy Å"
+        }
+        
+        # Check corner radius if present
+        if {[info exists ::PETK::gui::cornerRadius] && $::PETK::gui::cornerRadius > 0} {
+            set corner_radius $::PETK::gui::cornerRadius
+            set edge_radius [expr $pore_radius + $corner_radius]
+            
+            if {$edge_radius > $min_box_half_xy} {
+                set is_valid 0
+                lappend critical_errors "Edge radius ($edge_radius Å) > minimum box half-dimension ($min_box_half_xy Å)"
+                lappend critical_errors "  Edge radius = pore_radius ($pore_radius) + corner_radius ($corner_radius)"
+                lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
+                lappend critical_errors "  Required: edge_radius < $min_box_half_xy Å"
+                lappend critical_errors "  Solutions:"
+                lappend critical_errors "    1. Increase box dimensions (X,Y > [expr 2.0 * $edge_radius] Å)"
+                lappend critical_errors "    2. Reduce corner radius (< [expr $min_box_half_xy - $pore_radius] Å)"
+                lappend critical_errors "    3. Reduce pore radius"
+            } elseif {$edge_radius > [expr 0.8 * $min_box_half_xy]} {
+                lappend warnings "Edge radius ($edge_radius Å) > 80% of minimum box half-dimension"
+                lappend warnings "  Consider increasing box size for better simulation quality"
+            }
+        } elseif {$pore_radius > [expr 0.8 * $min_box_half_xy]} {
+            lappend warnings "Pore radius ($pore_radius Å) > 80% of minimum box half-dimension"
+            lappend warnings "  Consider increasing box size for better simulation quality"
+        }
+        
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+        set inner_radius [expr $::PETK::gui::innerDiameter / 2.0]
+        set outer_radius [expr $::PETK::gui::outerDiameter / 2.0]
+        
+        # Check inner radius
+        if {$inner_radius > $min_box_half_xy} {
+            set is_valid 0
+            lappend critical_errors "Inner radius ($inner_radius Å) > minimum box half-dimension ($min_box_half_xy Å)"
+            lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
+            lappend critical_errors "  Required: inner radius < $min_box_half_xy Å"
+        }
+        
+        # Check outer radius (more critical)
+        if {$outer_radius > $min_box_half_xy} {
+            set is_valid 0
+            lappend critical_errors "Outer radius ($outer_radius Å) > minimum box half-dimension ($min_box_half_xy Å)"
+            lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
+            lappend critical_errors "  Required: outer radius < $min_box_half_xy Å"
+        } elseif {$outer_radius > [expr 0.8 * $min_box_half_xy]} {
+            lappend warnings "Outer radius ($outer_radius Å) > 80% of minimum box half-dimension"
+            lappend warnings "  Consider increasing box size for better simulation quality"
+        }
+        
+    }
+    
+    # 3. ADDITIONAL GEOMETRIC VALIDATIONS
+    
+    # Check for minimum simulation space around pore
+    if {$::PETK::gui::autoCalculateBoxDimensions == 0} {
+        # Only check minimum spacing for manual box dimensions
+        set min_spacing 10.0  ; # Minimum 10 Å spacing recommendation
+        
+        if {$::PETK::gui::membraneType eq "cylindrical"} {
+            set effective_radius $pore_radius
+            if {[info exists ::PETK::gui::cornerRadius] && $::PETK::gui::cornerRadius > 0} {
+                set effective_radius [expr $pore_radius + $::PETK::gui::cornerRadius]
+            }
+            
+            set available_space [expr $min_box_half_xy - $effective_radius]
+            if {$available_space < $min_spacing} {
+                lappend warnings "Limited space around pore: only $available_space Å"
+                lappend warnings "  Recommended minimum: $min_spacing Å for proper solvation"
+            }
+        } elseif {$::PETK::gui::membraneType eq "doublecone"} {
+            set available_space [expr $min_box_half_xy - $outer_radius]
+            if {$available_space < $min_spacing} {
+                lappend warnings "Limited space around pore: only $available_space Å"
+                lappend warnings "  Recommended minimum: $min_spacing Å for proper solvation"
+            }
+        }
+    }
+    
+    # 4. COMPILE VALIDATION RESULTS
+    set detailed_message "=== PORE CONFIGURATION VALIDATION ===\n"
+    append detailed_message "Box dimensions: $xbox × $ybox × $zbox Å\n"
+    append detailed_message "Membrane thickness: $thickness Å\n"
+    append detailed_message "Pore type: $::PETK::gui::membraneType\n"
+    
+    if {$::PETK::gui::membraneType eq "cylindrical"} {
+        append detailed_message "Pore diameter: $::PETK::gui::cylindricalDiameter Å\n"
+        if {[info exists ::PETK::gui::cornerRadius] && $::PETK::gui::cornerRadius > 0} {
+            append detailed_message "Corner radius: $::PETK::gui::cornerRadius Å\n"
+        }
+    } else {
+        append detailed_message "Inner diameter: $::PETK::gui::innerDiameter Å\n"
+        append detailed_message "Outer diameter: $::PETK::gui::outerDiameter Å\n"
+    }
+    
+    if {$is_valid} {
+        set status "Valid"
+        append detailed_message "\n✓ CONFIGURATION IS VALID\n"
+        ::PETK::gui::updatePoreDiameter
+    } else {
+        set status "INVALID"
+        append detailed_message "\n✗ CONFIGURATION IS INVALID\n"
+        append detailed_message "\nCRITICAL ERRORS:\n"
+        foreach error $critical_errors {
+            append detailed_message "  • $error\n"
+        }
+    }
+    
+    if {[llength $warnings] > 0} {
+        append detailed_message "\nWARNINGS:\n"
+        foreach warning $warnings {
+            append detailed_message "  ⚠ $warning\n"
+        }
+    }
+    
+    append detailed_message "=====================================\n"
+    
+    return [list $status $detailed_message]
+}
+
+
+proc ::PETK::gui::updatePoreValidityStatus {xbox ybox zbox} {
+    
+    # Update the global pore validity status variable.
+    
+    #Args:
+    #    xbox, ybox, zbox: Box dimensions in Angstroms
+    
+    
+    set validation_result [::PETK::gui::validatePoreConfiguration $xbox $ybox $zbox]
+    set status [lindex $validation_result 0]
+    set detailed_message [lindex $validation_result 1]
+    
+    if {$status eq "Valid"} {
+        set ::PETK::gui::poreValidityStatus "Valid"
+    } else {
+        set ::PETK::gui::poreValidityStatus "INVALID - Check console"
+    }
+    
+    # Print detailed validation report
+    puts $detailed_message
+    
+    return $status
+}
+
+####################################################
+# Tab 2: Analyte Setup
+####################################################
+
+
+proc ::PETK::gui::buildTab2 {tab2} {
+
+    # === CRITICAL: Configure tab to expand ===
+    grid columnconfigure $tab2 0 -weight 1
+    grid rowconfigure $tab2 0 -weight 1
+
+    # Create scrollable canvas container
+    canvas $tab2.canvas -highlightthickness 0
+    ttk::scrollbar $tab2.vscroll -orient vertical -command [list $tab2.canvas yview]
+    ttk::scrollbar $tab2.hscroll -orient horizontal -command [list $tab2.canvas xview]
+    
+    # Configure canvas scrolling
+    $tab2.canvas configure -yscrollcommand [list $tab2.vscroll set]
+    $tab2.canvas configure -xscrollcommand [list $tab2.hscroll set]
+    
+    # Create the actual content frame inside the canvas
+    ttk::frame $tab2.canvas.content
+    set canvas_window [$tab2.canvas create window 0 0 -anchor nw -window $tab2.canvas.content]
+    
+    # Grid the canvas and scrollbars with proper expansion
+    grid $tab2.canvas -row 0 -column 0 -sticky nsew
+    grid $tab2.vscroll -row 0 -column 1 -sticky ns
+    grid $tab2.hscroll -row 1 -column 0 -sticky ew
+    
+    # Configure grid weights - CRITICAL for expansion
+    grid rowconfigure $tab2 0 -weight 1
+    grid columnconfigure $tab2 0 -weight 1
+
+    # Now use the content frame as your container
+    set container $tab2.canvas.content
+    grid columnconfigure $container 0 -weight 1
+    grid rowconfigure $container {3 4} -weight 1  ; # Make results and details expandable
+    
+    set row 0
+    # === Analyte Input Frame ===
+    ttk::labelframe $container.input -text "Analyte Input" -padding 10
+    grid $container.input -column 0 -row $row -sticky ew -pady "0 10" -padx 10
+    grid columnconfigure $container.input {1 2} -weight 1
+    incr row
+
+    ttk::label  $container.input.pdblbl -text "PDB file:" -width 12
+    ttk::entry  $container.input.pdb -textvariable ::PETK::gui::analytePDB -width 35
+    ttk::button $container.input.browse -text "Browse..." -command ::PETK::gui::browseAnalytePdb
+    ttk::button $container.input.analyze -text "Analyze & Center" -command ::PETK::gui::analyzeAnalyte -style "Accent.TButton"
+
+    ttk::label  $container.input.sellbl -text "Atom selection:" -width 12
+    ttk::entry  $container.input.sel -textvariable ::PETK::gui::analyteSelection -width 35
+    ttk::label  $container.input.selhelp -text "Examples: 'all', 'protein', 'not water'" -font {TkDefaultFont 9 italic} -foreground gray
+
+    grid $container.input.pdblbl $container.input.pdb $container.input.browse $container.input.analyze -sticky ew -pady 3
+    grid $container.input.sellbl $container.input.sel $container.input.selhelp - -sticky ew -pady 3
+
+    # === Analysis Results Frame ===
+    ttk::labelframe $container.results -text "Analysis Results" -padding 10
+    grid $container.results -column 0 -row $row -sticky nsew -pady "0 10" -padx 10
+    grid columnconfigure $container.results {0 1} -weight 1
+    grid rowconfigure $container.results 0 -weight 1
+    incr row
+
+    # Results display in two columns
+    # Left column - Basic measurements
+    ttk::frame $container.results.left
+    grid $container.results.left -column 0 -row 0 -sticky nsew -padx "0 10"
+    grid rowconfigure $container.results.left 6 -weight 1
+
+    ttk::label $container.results.left.title -text "Molecular Dimensions" -font {TkDefaultFont 11 bold}
+    grid $container.results.left.title -sticky w -pady "0 10"
+
+    # Bounding sphere radius
+    ttk::label $container.results.left.radiuslbl -text "Bounding radius:" -width 15
+    ttk::label $container.results.left.radius -textvariable ::PETK::gui::analyteDiameter -width 15 -anchor w -relief sunken -background white
+    grid $container.results.left.radiuslbl $container.results.left.radius -sticky ew -pady 2
+
+    # Approximate volume
+    ttk::label $container.results.left.vollbl -text "Approx. volume:" -width 15
+    ttk::label $container.results.left.vol -textvariable ::PETK::gui::analyteVolume -width 15 -anchor w -relief sunken -background white
+    grid $container.results.left.vollbl $container.results.left.vol -sticky ew -pady 2
+
+    # Extreme atom distance
+    ttk::label $container.results.left.distlbl -text "Max distance:" -width 15
+    ttk::label $container.results.left.dist -textvariable ::PETK::gui::analyteDistance -width 15 -anchor w -relief sunken -background white
+    grid $container.results.left.distlbl $container.results.left.dist -sticky ew -pady 2
+
+    # Fit status with nanopore
+    ttk::label $container.results.left.statuslbl -text "Pore fit status:" -width 15
+    ttk::label $container.results.left.statusval -textvariable ::PETK::gui::fitStatus -width 15 -anchor w -relief sunken -background white -wraplength 120
+    grid $container.results.left.statuslbl $container.results.left.statusval -sticky ew -pady 2
+
+    # Right column - Centering information
+    ttk::frame $container.results.right
+    grid $container.results.right -column 1 -row 0 -sticky nsew -padx "10 0"
+    grid rowconfigure $container.results.right 6 -weight 1
+
+    ttk::label $container.results.right.title -text "Centering & Alignment" -font {TkDefaultFont 11 bold}
+    grid $container.results.right.title -sticky w -pady "0 10"
+
+    # Verification score
+    ttk::label $container.results.right.scorelbl -text "Quality score:" -width 15
+    ttk::label $container.results.right.score -textvariable ::PETK::gui::verificationScore -width 15 -anchor w -relief sunken -background white
+    grid $container.results.right.scorelbl $container.results.right.score -sticky ew -pady 2
+
+    # Centering status
+    ttk::label $container.results.right.centerlbl -text "Centering:" -width 15
+    ttk::label $container.results.right.center -textvariable ::PETK::gui::centeringStatus -width 15 -anchor w -relief sunken -background white
+    grid $container.results.right.centerlbl $container.results.right.center -sticky ew -pady 2
+
+    # Surface alignment status
+    ttk::label $container.results.right.alignlbl -text "Surface align:" -width 15
+    ttk::label $container.results.right.align -textvariable ::PETK::gui::alignmentStatus -width 15 -anchor w -relief sunken -background white
+    grid $container.results.right.alignlbl $container.results.right.align -sticky ew -pady 2
+
+    # Output file status
+    ttk::label $container.results.right.outputlbl -text "Centered PDB:" -width 15
+    ttk::label $container.results.right.output -textvariable ::PETK::gui::outputFileStatus -width 15 -anchor w -relief sunken -background white -wraplength 120
+    grid $container.results.right.outputlbl $container.results.right.output -sticky ew -pady 2
+
+    # === Detailed Information Frame (Expandable) ===
+    ttk::labelframe $container.details -text "Detailed Information" -padding 10
+    grid $container.details -column 0 -row $row -sticky nsew -pady "0 10" -padx 10
+    grid columnconfigure $container.details 0 -weight 1
+    grid rowconfigure $container.details 1 -weight 1
+    incr row
+
+    # Toggle button for detailed view
+    ttk::frame $container.details.header
+    grid $container.details.header -sticky ew -pady "0 5"
+    grid columnconfigure $container.details.header 0 -weight 1
+
+    ttk::button $container.details.header.toggle -text "▼ Show Details" -command ::PETK::gui::toggleDetailView
+    ttk::button $container.details.header.export -text "Export Report" -command ::PETK::gui::exportAnalysisReport
+    grid $container.details.header.toggle -sticky w
+    grid $container.details.header.export -sticky e -row 0 -column 1
+
+    # Scrollable text area for detailed information
+    ttk::frame $container.details.content
+    text $container.details.content.text -height 8 -width 80 -wrap word -state disabled \
+        -yscrollcommand [list $container.details.content.scroll set] -font {TkFixedFont 9}
+    ttk::scrollbar $container.details.content.scroll -orient vertical -command [list $container.details.content.text yview]
+
+    grid $container.details.content.text $container.details.content.scroll -sticky nsew
+    grid columnconfigure $container.details.content 0 -weight 1
+    grid rowconfigure $container.details.content 0 -weight 1
+
+    # Store reference to text widget and initially hide details
+    set ::PETK::gui::detailsTextWidget $container.details.content.text
+    set ::PETK::gui::detailsVisible 0
+
+    # === Visualization Controls Frame ===
+    ttk::labelframe $container.controls -text "Visualization & Actions" -padding 10
+    grid $container.controls -column 0 -row $row -sticky ew -pady "0 10" -padx 10
+    grid columnconfigure $container.controls {0 1 2 3} -weight 1
+    incr row
+
+    ttk::button $container.controls.show -text "Show Molecule" -command ::PETK::gui::showAnalyte
+    ttk::button $container.controls.hide -text "Hide Molecule" -command ::PETK::gui::hideAnalyte
+    ttk::button $container.controls.center -text "Center View" -command ::PETK::gui::centerAnalyteView
+    ttk::button $container.controls.representations -text "Change Rep" -command ::PETK::gui::cycleAnalyteRepresentation
+
+    grid $container.controls.show $container.controls.hide $container.controls.center $container.controls.representations -sticky ew -padx 5
+
+    # === ENHANCED RESIZE HANDLING ===
+    
+    # Bind resize events for proper canvas expansion
+    bind $tab2.canvas <Configure> [list ::PETK::gui::onCanvasConfigured $tab2.canvas $canvas_window]
+    bind $container <Configure> [list ::PETK::gui::onContentConfigured $tab2.canvas $canvas_window]
+    
+    # Store references for later use (with unique names for tab2)
+    set ::PETK::gui::tab2MainCanvas $tab2.canvas
+    set ::PETK::gui::tab2CanvasWindow $canvas_window
+    set ::PETK::gui::tab2ContentContainer $container
+    
+    # Initialize result variables
+    ::PETK::gui::initializeResultVariables
+    
+    # Force proper sizing after everything is created
+    after idle [list ::PETK::gui::forceInitialCanvasResize $tab2.canvas $canvas_window]
+}
+
+####################################################
+# Tab 2 Function
 ####################################################
 
 proc ::PETK::gui::initializeResultVariables {} {
+    if {![info exists ::PETK::gui::analyteSelection]} {
+        set ::PETK::gui::analyteSelection "all"
+    }
+
     # Initialize all result display variables
     if {![info exists ::PETK::gui::analyteDiameter]} {
         set ::PETK::gui::analyteDiameter "Not analyzed"
@@ -373,6 +1609,18 @@ proc ::PETK::gui::initializeResultVariables {} {
     }
     if {![info exists ::PETK::gui::currentRepresentation]} {
         set ::PETK::gui::currentRepresentation 0
+    }
+}
+
+####################################################
+## Analyte Input
+####################################################
+
+proc ::PETK::gui::browseAnalytePdb {} {
+    set pdbType { {{Protein Data Bank files} {.pdb}} {{All Files} *} }
+    set tempfile [tk_getOpenFile -title "Select Analyte PDB File" -multiple 0 -filetypes $pdbType]
+    if {![string eq $tempfile ""]} {
+        set ::PETK::gui::analytePDB $tempfile
     }
 }
 
@@ -691,13 +1939,13 @@ proc ::PETK::gui::analyzeAnalyteWithCentering {} {
     # Check fit with nanopore
     if {$::PETK::gui::poreDiameter != ""} {
         set poreRad [expr {double($::PETK::gui::poreDiameter)}]
-        if {$maxDist < $poreRad} {
-            set ::PETK::gui::fitStatus "FITS (clearance: [format "%.2f" [expr {$poreRad - $maxDist}]] Å)"
+        if {$distance < $poreRad} {
+            set ::PETK::gui::fitStatus "FITS (clearance: [format "%.2f" [expr {$poreRad - $distance}]] Å)"
             if {[info exists ::PETK::gui::window] && [winfo exists $::PETK::gui::window.hlf.nb.tab1.analyte.results.statusval]} {
                 $::PETK::gui::window.hlf.nb.tab1.analyte.results.statusval configure -foreground green
             }
         } else {
-            set ::PETK::gui::fitStatus "TOO LARGE (excess: [format "%.2f" [expr {$maxDist - $poreRad}]] Å)"
+            set ::PETK::gui::fitStatus "TOO LARGE (excess: [format "%.2f" [expr {$distance - $poreRad}]] Å)"
             if {[info exists ::PETK::gui::window] && [winfo exists $::PETK::gui::window.hlf.nb.tab1.analyte.results.statusval]} {
                 $::PETK::gui::window.hlf.nb.tab1.analyte.results.statusval configure -foreground red
             }
@@ -740,6 +1988,48 @@ proc ::PETK::gui::showAnalyte {} {
         mol top $::PETK::gui::analyteMol
         display resetview
         scale by 0.8
+    }
+}
+
+proc ::PETK::gui::hideAnalyte {} {
+    if {[info exists ::PETK::gui::analyteMol] && $::PETK::gui::analyteMol != ""} {
+        catch {mol off $::PETK::gui::analyteMol}
+    }
+}
+
+proc ::PETK::gui::centerAnalyteView {} {
+    if {[info exists ::PETK::gui::analyteMol] && $::PETK::gui::analyteMol != ""} {
+        mol top $::PETK::gui::analyteMol
+        display resetview
+        scale by 1.0
+    }
+}
+
+proc ::PETK::gui::cycleAnalyteRepresentation {} {
+    if {![info exists ::PETK::gui::analyteMol] || $::PETK::gui::analyteMol == ""} {
+        return
+    }
+    
+    if {![info exists ::PETK::gui::currentRepresentation]} {
+        set ::PETK::gui::currentRepresentation 0
+    }
+    
+    set representations {"Lines" "VDW" "CPK" "Licorice" "NewCartoon"}
+    set rep_names {"Lines" "VDW (spheres)" "CPK" "Licorice (sticks)" "Cartoon"}
+    
+    set ::PETK::gui::currentRepresentation [expr {($::PETK::gui::currentRepresentation + 1) % [llength $representations]}]
+    set new_rep [lindex $representations $::PETK::gui::currentRepresentation]
+    set rep_name [lindex $rep_names $::PETK::gui::currentRepresentation]
+    
+    # Update the representation
+    catch {
+        mol modstyle 0 $::PETK::gui::analyteMol $new_rep
+        puts "Changed representation to: $rep_name"
+    }
+    
+    # Update button text to show current representation
+    if {[winfo exists $::PETK::gui::window.hlf.nb.tab1.controls.representations]} {
+        $::PETK::gui::window.hlf.nb.tab1.controls.representations configure -text "Rep: $rep_name"
     }
 }
 
@@ -999,7 +2289,7 @@ proc ::PETK::gui::verifyCentering {} {
         set original_filename [file tail $::PETK::gui::analytePDB]
         set name_without_ext [file rootname $original_filename]
         set output_filename "centered_${name_without_ext}.pdb"
-        
+        set ::PETK::gui::semAnalytePDB "centered_${name_without_ext}.pdb"
         # Use work directory if it exists, otherwise use same directory as input
         if {[info exists ::PETK::gui::workdir] && $::PETK::gui::workdir != ""} {
             set output_path [file join $::PETK::gui::workdir $output_filename]
@@ -1045,7 +2335,6 @@ proc ::PETK::gui::verifyCentering {} {
     
     return $total_score
 }
-
 
 ####################################################
 ### Information Display and Control Functions
@@ -1103,21 +2392,28 @@ proc ::PETK::gui::updateFitStatus {} {
     }
 }
 
+
 proc ::PETK::gui::toggleDetailView {} {
+    # Initialize detailsVisible if it doesn't exist
     if {![info exists ::PETK::gui::detailsVisible]} {
         set ::PETK::gui::detailsVisible 0
     }
     
+    # Toggle the visibility state
     set ::PETK::gui::detailsVisible [expr {!$::PETK::gui::detailsVisible}]
     
-    set button $::PETK::gui::window.hlf.nb.tab1.details.header.toggle
-    set content $::PETK::gui::window.hlf.nb.tab1.details.content
+    # Get references to the widgets with correct paths
+    set button .petk_main_window.hlf.nb.tab2.canvas.content.details.header.toggle
+    set content .petk_main_window.hlf.nb.tab2.canvas.content.details.content
     
     if {$::PETK::gui::detailsVisible} {
+        # Show the details content
         grid $content -sticky nsew -pady "5 0"
         $button configure -text "▲ Hide Details"
+        # Update the detailed information
         ::PETK::gui::updateDetailedInformation
     } else {
+        # Hide the details content
         grid forget $content
         $button configure -text "▼ Show Details"
     }
@@ -1364,54 +2660,6 @@ proc ::PETK::gui::exportAnalysisReport {} {
         }
     }
 }
-
-
-####################################################
-### Visualization Control Functions
-####################################################
-
-proc ::PETK::gui::hideAnalyte {} {
-    if {[info exists ::PETK::gui::analyteMol] && $::PETK::gui::analyteMol != ""} {
-        catch {mol off $::PETK::gui::analyteMol}
-    }
-}
-
-proc ::PETK::gui::centerAnalyteView {} {
-    if {[info exists ::PETK::gui::analyteMol] && $::PETK::gui::analyteMol != ""} {
-        mol top $::PETK::gui::analyteMol
-        display resetview
-        scale by 1.0
-    }
-}
-
-proc ::PETK::gui::cycleAnalyteRepresentation {} {
-    if {![info exists ::PETK::gui::analyteMol] || $::PETK::gui::analyteMol == ""} {
-        return
-    }
-    
-    if {![info exists ::PETK::gui::currentRepresentation]} {
-        set ::PETK::gui::currentRepresentation 0
-    }
-    
-    set representations {"Lines" "VDW" "CPK" "Licorice" "NewCartoon"}
-    set rep_names {"Lines" "VDW (spheres)" "CPK" "Licorice (sticks)" "Cartoon"}
-    
-    set ::PETK::gui::currentRepresentation [expr {($::PETK::gui::currentRepresentation + 1) % [llength $representations]}]
-    set new_rep [lindex $representations $::PETK::gui::currentRepresentation]
-    set rep_name [lindex $rep_names $::PETK::gui::currentRepresentation]
-    
-    # Update the representation
-    catch {
-        mol modstyle 0 $::PETK::gui::analyteMol $new_rep
-        puts "Changed representation to: $rep_name"
-    }
-    
-    # Update button text to show current representation
-    if {[winfo exists $::PETK::gui::window.hlf.nb.tab1.controls.representations]} {
-        $::PETK::gui::window.hlf.nb.tab1.controls.representations configure -text "Rep: $rep_name"
-    }
-}
-
 ####################################################
 ### Helper functions for matrix operations and surface alignment
 ####################################################
@@ -1596,173 +2844,59 @@ proc ::PETK::gui::matrix_vector_multiply_3x3 {matrix vector} {
 }
 
 
-
 ####################################################
-# Complete Tab 2: Membrane and Nanopore Builder
+# Tab 3 SEM Setup
 ####################################################
-
-####################################################
-# Scrollable Tab 2: Membrane and Nanopore Builder
-####################################################
-
-proc ::PETK::gui::buildTab2 {tab2} {
-    ::PETK::gui::initializeMembraneVariables
+proc ::PETK::gui::buildTab3 {tab3} {
+    # Initialize any required variables
     ::PETK::gui::initializeSEMVariables
 
-    grid columnconfigure $tab2 0 -weight 1
-    grid rowconfigure $tab2 0 -weight 1
+    # === CRITICAL: Configure tab to expand ===
+    grid columnconfigure $tab3 0 -weight 1
+    grid rowconfigure $tab3 0 -weight 1
 
-    # Create scrollable canvas container (like Tab 3)
-    canvas $tab2.canvas -highlightthickness 0
-    ttk::scrollbar $tab2.vscroll -orient vertical -command [list $tab2.canvas yview]
-    ttk::scrollbar $tab2.hscroll -orient horizontal -command [list $tab2.canvas xview]
+    # Create scrollable canvas container
+    canvas $tab3.canvas -highlightthickness 0
+    ttk::scrollbar $tab3.vscroll -orient vertical -command [list $tab3.canvas yview]
+    ttk::scrollbar $tab3.hscroll -orient horizontal -command [list $tab3.canvas xview]
     
     # Configure canvas scrolling
-    $tab2.canvas configure -yscrollcommand [list $tab2.vscroll set]
-    $tab2.canvas configure -xscrollcommand [list $tab2.hscroll set]
+    $tab3.canvas configure -yscrollcommand [list $tab3.vscroll set]
+    $tab3.canvas configure -xscrollcommand [list $tab3.hscroll set]
     
     # Create the actual content frame inside the canvas
-    ttk::frame $tab2.canvas.content
-    set canvas_window [$tab2.canvas create window 0 0 -anchor nw -window $tab2.canvas.content]
+    ttk::frame $tab3.canvas.content
+    set canvas_window [$tab3.canvas create window 0 0 -anchor nw -window $tab3.canvas.content]
     
-    # Grid the canvas and scrollbars
-    grid $tab2.canvas -row 0 -column 0 -sticky nsew
-    grid $tab2.vscroll -row 0 -column 1 -sticky ns
-    grid $tab2.hscroll -row 1 -column 0 -sticky ew
+    # Grid the canvas and scrollbars with proper expansion
+    grid $tab3.canvas -row 0 -column 0 -sticky nsew
+    grid $tab3.vscroll -row 0 -column 1 -sticky ns
+    grid $tab3.hscroll -row 1 -column 0 -sticky ew
     
-    # Configure grid weights
-    grid rowconfigure $tab2 0 -weight 1
-    grid columnconfigure $tab2 0 -weight 1
+    # Configure grid weights - CRITICAL for expansion
+    grid rowconfigure $tab3 0 -weight 1
+    grid columnconfigure $tab3 0 -weight 1
 
     # Now use the content frame as your container
-    set container $tab2.canvas.content
+    set container $tab3.canvas.content
     grid columnconfigure $container 0 -weight 1
+    grid rowconfigure $container {4 5} -weight 1  ; # Make summary and parameter sections expandable
+    
     set row 0
 
-    # === PORE TYPE SELECTION ===
-    ttk::labelframe $container.poretype -text "Nanopore Type Selection" -padding 10
-    grid $container.poretype -row $row -column 0 -sticky ew -padx 10 -pady "10 5"
-    grid columnconfigure $container.poretype {0 1} -weight 1
-    incr row
-
-    ttk::radiobutton $container.poretype.cylindrical -text "Cylindrical Pore" -value "cylindrical" \
-        -variable ::PETK::gui::membraneType -command {::PETK::gui::updateMembraneTypeDisplay}
-    ttk::radiobutton $container.poretype.doublecone -text "Double Cone Pore" -value "doublecone" \
-        -variable ::PETK::gui::membraneType -command {::PETK::gui::updateMembraneTypeDisplay}
-
-    grid $container.poretype.cylindrical $container.poretype.doublecone -sticky w -pady 3 -padx 20
-
-    # === INPUT FILES SECTION ===
-    ttk::labelframe $container.files -text "Input Configuration" -padding 10
-    grid $container.files -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
-    grid columnconfigure $container.files {1 2} -weight 1
-    incr row
-
-    # Centered analyte PDB file
-    ttk::label $container.files.analytelbl -text "Centered analyte PDB:" -width 20
-    ttk::entry $container.files.analyte -textvariable ::PETK::gui::semAnalytePDB -width 40
-    ttk::button $container.files.browseanalyte -text "Browse..." -command {::PETK::gui::browseSEMAnalytePdb}
-    ttk::button $container.files.syncanalyte -text "↻ Use from Tab 1" -command {::PETK::gui::syncAnalyteFromTab1}
-
-    grid $container.files.analytelbl $container.files.analyte $container.files.browseanalyte $container.files.syncanalyte -sticky ew -pady 3
-
-    # === PORE PARAMETERS SECTION ===
-    ttk::labelframe $container.params -text "Pore Parameters" -padding 10
-    grid $container.params -row $row -column 0 -sticky ew -padx 10 -pady 5
-    grid columnconfigure $container.params {1 3 5} -weight 1
-    incr row
-
-    # Common parameter: Nanopore thickness
-    ttk::label $container.params.thicklbl -text "Nanopore thickness (Å):" -width 20
-    ttk::entry $container.params.thick -textvariable ::PETK::gui::nanoporeThickness -width 12 -justify center
-    ttk::button $container.params.sync -text "↻ Sync from Tab 1" -command {::PETK::gui::syncFromTab1}
-
-    grid $container.params.thicklbl $container.params.thick $container.params.sync - - - -sticky ew -pady 5
-
-    # Cylindrical pore parameters
-    ttk::frame $container.params.cyl
-    ttk::label $container.params.cyl.diamlbl -text "Pore diameter (Å):" -width 20
-    ttk::entry $container.params.cyl.diam -textvariable ::PETK::gui::cylindricalDiameter -width 12 -justify center
-    ttk::label $container.params.cyl.radiuslbl -text "Corner radius (Å):" -width 15
-    ttk::entry $container.params.cyl.radius -textvariable ::PETK::gui::cornerRadius -width 12 -justify center
-
-    grid $container.params.cyl.diamlbl $container.params.cyl.diam $container.params.cyl.radiuslbl $container.params.cyl.radius -sticky ew -pady 3 -padx 5
-
-    # Double cone pore parameters
-    ttk::frame $container.params.cone
-    ttk::label $container.params.cone.innerlbl -text "Inner diameter (Å):" -width 20
-    ttk::entry $container.params.cone.inner -textvariable ::PETK::gui::innerDiameter -width 12 -justify center
-    ttk::label $container.params.cone.outerlbl -text "Outer diameter (Å):" -width 15
-    ttk::entry $container.params.cone.outer -textvariable ::PETK::gui::outerDiameter -width 12 -justify center
-
-    grid $container.params.cone.innerlbl $container.params.cone.inner $container.params.cone.outerlbl $container.params.cone.outer -sticky ew -pady 3 -padx 5
-
-    # === VISUALIZATION SECTION ===
-    ttk::labelframe $container.visualization -text "Pore Geometry Visualization" -padding 10
-    grid $container.visualization -row $row -column 0 -sticky nsew -padx 10 -pady 5
-    grid columnconfigure $container.visualization {0 1} -weight 1
-    grid rowconfigure $container.visualization 1 -weight 1
-    incr row
-
-    # Image display frame
-    ttk::frame $container.visualization.image
-    grid $container.visualization.image -column 0 -row 0 -rowspan 2 -sticky nsew -padx "0 10"
-    grid rowconfigure $container.visualization.image 0 -weight 1
-    grid columnconfigure $container.visualization.image 0 -weight 1
-
-    # Create canvas for image display
-    canvas $container.visualization.image.canvas -width 300 -height 250 -bg white -relief sunken -borderwidth 2
-    grid $container.visualization.image.canvas -sticky nsew
-
-    # Store canvas reference for image updates
-    set ::PETK::gui::poreImageCanvas $container.visualization.image.canvas
-    
-    # Parameter summary frame
-    ttk::frame $container.visualization.summary
-    grid $container.visualization.summary -column 1 -row 0 -sticky nsew -padx "10 0"
-    grid rowconfigure $container.visualization.summary 6 -weight 1
-
-    ttk::label $container.visualization.summary.title -text "Current Configuration" -font {TkDefaultFont 11 bold}
-    grid $container.visualization.summary.title -sticky w -pady "0 10"
-
-    # Parameter display labels
-    ttk::label $container.visualization.summary.typelbl -text "Pore type:" -width 15
-    ttk::label $container.visualization.summary.type -textvariable ::PETK::gui::currentPoreType -width 15 -anchor w -relief sunken -background white
-    grid $container.visualization.summary.typelbl $container.visualization.summary.type -sticky ew -pady 2
-
-    ttk::label $container.visualization.summary.thicklbl -text "Thickness:" -width 15
-    ttk::label $container.visualization.summary.thickval -textvariable ::PETK::gui::displayThickness -width 15 -anchor w -relief sunken -background white
-    grid $container.visualization.summary.thicklbl $container.visualization.summary.thickval -sticky ew -pady 2
-
-    ttk::label $container.visualization.summary.param1lbl -text "Parameter 1:" -width 15
-    ttk::label $container.visualization.summary.param1val -textvariable ::PETK::gui::displayParam1 -width 15 -anchor w -relief sunken -background white
-    grid $container.visualization.summary.param1lbl $container.visualization.summary.param1val -sticky ew -pady 2
-
-    ttk::label $container.visualization.summary.param2lbl -text "Parameter 2:" -width 15
-    ttk::label $container.visualization.summary.param2val -textvariable ::PETK::gui::displayParam2 -width 15 -anchor w -relief sunken -background white
-    grid $container.visualization.summary.param2lbl $container.visualization.summary.param2val -sticky ew -pady 2
-
-    # Volume calculation
-    ttk::label $container.visualization.summary.vollbl -text "Pore volume:" -width 15
-    ttk::label $container.visualization.summary.volval -textvariable ::PETK::gui::calculatedVolume -width 15 -anchor w -relief sunken -background white
-    grid $container.visualization.summary.vollbl $container.visualization.summary.volval -sticky ew -pady 2
-
-    # Update button
-    ttk::button $container.visualization.summary.update -text "Update Preview" -command {::PETK::gui::updatePoreVisualization}
-    grid $container.visualization.summary.update -sticky ew -pady "10 0"
-
-    # === CONDUCTIVITY SETTINGS SECTION ===
+    # === SIMULATION PARAMETERS SECTION ===
     ttk::labelframe $container.simulation -text "Simulation Parameters" -padding 10
-    grid $container.simulation -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
+    grid $container.simulation -row $row -column 0 -sticky ew -padx 10 -pady "10 5"
     grid columnconfigure $container.simulation {1 3 5 7} -weight 1
     incr row
 
-    # Bulk conductivity
+    # Applied voltage
     ttk::label $container.simulation.voltagelbl -text "Applied voltage (mV):" -width 18
     ttk::entry $container.simulation.voltage -textvariable ::PETK::gui::appliedVoltage -width 12 -justify center
 
-    grid $container.simulation.voltagelbl $container.simulation.voltage  -sticky ew -pady 3 -padx 5
+    grid $container.simulation.voltagelbl $container.simulation.voltage - - - - -sticky ew -pady 3 -padx 5
 
+    # Bulk and membrane conductivity
     ttk::label $container.simulation.bulklbl -text "Bulk conductivity (S/m):" -width 20
     ttk::entry $container.simulation.bulk -textvariable ::PETK::gui::bulkConductivity -width 12 -justify center
     ttk::label $container.simulation.memblbl -text "Membrane conductivity (S/m):" -width 25
@@ -1785,6 +2919,7 @@ proc ::PETK::gui::buildTab2 {tab2} {
 
     grid $container.grid.reslbl $container.grid.res $container.grid.pointslbl $container.grid.pointsval $container.grid.update - -sticky ew -pady 3
 
+    # VdW radii settings
     ttk::label $container.grid.vdwlbl -text "Use VdW radii:" -width 15
     ttk::checkbutton $container.grid.vdw -variable ::PETK::gui::semUseVdWRadii
     ttk::label $container.grid.defaultlbl -text "Default radius (Å):" -width 18
@@ -1807,82 +2942,6 @@ proc ::PETK::gui::buildTab2 {tab2} {
     ttk::entry $container.movement.step -textvariable ::PETK::gui::zStep -width 12 -justify center
 
     grid $container.movement.startlbl $container.movement.start $container.movement.endlbl $container.movement.end $container.movement.steplbl $container.movement.step -sticky ew -pady 3
-
-
-    # === BOX DIMENSIONS SECTION ===
-    ttk::labelframe $container.boxdim -text "Box Dimensions" -padding 10
-    grid $container.boxdim -row $row -column 0 -sticky ew -padx 10 -pady 5
-    grid columnconfigure $container.boxdim {1 3 5} -weight 1
-    incr row
-
-    # Auto-calculate checkbox
-    ttk::checkbutton $container.boxdim.auto -text "Auto-calculate box dimensions" \
-        -variable ::PETK::gui::autoCalculateBoxDimensions -command {::PETK::gui::toggleBoxDimensionMode}
-    ttk::label $container.boxdim.cutofflbl -text "Distance cutoff (Å):" -width 18
-    ttk::entry $container.boxdim.cutoff -textvariable ::PETK::gui::sysCutoff -width 12 -justify center
-
-    grid $container.boxdim.auto $container.boxdim.cutofflbl $container.boxdim.cutoff -columnspan 6 -sticky w -pady "0 5"
-
-    # Manual box dimension inputs
-    ttk::frame $container.boxdim.manual
-    ttk::label $container.boxdim.manual.xlbl -text "X size (Å):" -width 12
-    ttk::entry $container.boxdim.manual.x -textvariable ::PETK::gui::boxSizeX -width 12 -justify center
-    ttk::label $container.boxdim.manual.ylbl -text "Y size (Å):" -width 12
-    ttk::entry $container.boxdim.manual.y -textvariable ::PETK::gui::boxSizeY -width 12 -justify center
-    ttk::label $container.boxdim.manual.zlbl -text "Z size (Å):" -width 12
-    ttk::entry $container.boxdim.manual.z -textvariable ::PETK::gui::boxSizeZ -width 12 -justify center
-
-    grid $container.boxdim.manual.xlbl $container.boxdim.manual.x $container.boxdim.manual.ylbl $container.boxdim.manual.y $container.boxdim.manual.zlbl $container.boxdim.manual.z -sticky ew -pady 2
-
-    # Auto-calculated dimension display
-    ttk::frame $container.boxdim.auto_display
-    ttk::label $container.boxdim.auto_display.title -text "Auto-calculated dimensions:" -font {TkDefaultFont 10 bold}
-    grid $container.boxdim.auto_display.title -columnspan 6 -sticky w -pady "0 5"
-
-    ttk::label $container.boxdim.auto_display.xlbl -text "X range:" -width 12
-    ttk::label $container.boxdim.auto_display.xval -textvariable ::PETK::gui::autoBoxX -width 25 -anchor w -relief sunken -background white
-
-    ttk::label $container.boxdim.auto_display.ylbl -text "Y range:" -width 12
-    ttk::label $container.boxdim.auto_display.yval -textvariable ::PETK::gui::autoBoxY -width 25 -anchor w -relief sunken -background white
-
-    ttk::label $container.boxdim.auto_display.zlbl -text "Z range:" -width 12
-    ttk::label $container.boxdim.auto_display.zval -textvariable ::PETK::gui::autoBoxZ -width 25 -anchor w -relief sunken -background white
-
-    grid $container.boxdim.auto_display.xlbl $container.boxdim.auto_display.xval - - - - -sticky ew -pady 2
-    grid $container.boxdim.auto_display.ylbl $container.boxdim.auto_display.yval - - - - -sticky ew -pady 2
-    grid $container.boxdim.auto_display.zlbl $container.boxdim.auto_display.zval - - - - -sticky ew -pady 2
-
-    ttk::button $container.boxdim.auto_display.calc -text "Recalculate Box" -command {::PETK::gui::calculateBoxDimensions}
-    grid $container.boxdim.auto_display.calc -row 3 -column 10 -columnspan 2 -sticky w -pady "5 0"
-
-    # Grid the appropriate frame based on mode
-    if {$::PETK::gui::autoCalculateBoxDimensions} {
-        grid $container.boxdim.auto_display -row 1 -column 0 -columnspan 6 -sticky ew
-    } else {
-        grid $container.boxdim.manual -row 1 -column 0 -columnspan 6 -sticky ew
-    }
-    # === OUTPUT SETTINGS SECTION ===
-    ttk::labelframe $container.output -text "Output Settings" -padding 10
-    grid $container.output -row $row -column 0 -sticky ew -padx 10 -pady 5
-    grid columnconfigure $container.output {1 2} -weight 1
-    incr row
-
-    # Output directory
-    ttk::label $container.output.dirlbl -text "Output directory:" -width 18
-    ttk::entry $container.output.dir -textvariable ::PETK::gui::workdir -width 35
-    ttk::button $container.output.browsedir -text "Browse..." -command {::PETK::gui::selectWorkDir}
-
-    # Output prefix
-    ttk::label $container.output.prefixlbl -text "Output prefix:" -width 18
-    ttk::entry $container.output.prefix -textvariable ::PETK::gui::outputPrefix -width 25
-
-    # Preview frames
-    ttk::label $container.output.previewlbl -text "Preview frames:" -width 15
-    ttk::entry $container.output.preview -textvariable ::PETK::gui::semPreviewFrames -width 12 -justify center
-
-    grid $container.output.dirlbl $container.output.dir $container.output.browsedir -sticky ew -pady 3
-    grid $container.output.prefixlbl $container.output.prefix - -sticky ew -pady 3
-    grid $container.output.previewlbl $container.output.preview - -sticky ew -pady 3
 
     # === PYTHON ENVIRONMENT SECTION ===
     ttk::labelframe $container.python -text "Python Environment" -padding 10
@@ -1938,7 +2997,7 @@ proc ::PETK::gui::buildTab2 {tab2} {
     
     # === PARAMETER SUMMARY SECTION ===
     ttk::labelframe $container.summary -text "Parameter Summary" -padding 10
-    grid $container.summary -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
+    grid $container.summary -row $row -column 0 -sticky nsew -padx 10 -pady "5 5"
     grid columnconfigure $container.summary 0 -weight 1
     grid rowconfigure $container.summary 1 -weight 1
     incr row
@@ -1967,72 +3026,61 @@ proc ::PETK::gui::buildTab2 {tab2} {
     # === ACTION BUTTONS SECTION ===
     ttk::labelframe $container.actions -text "Actions" -padding 10
     grid $container.actions -row $row -column 0 -sticky ew -padx 10 -pady "5 10"
-    grid columnconfigure $container.actions {0 1 2 3} -weight 1
+    grid columnconfigure $container.actions {0 1 2} -weight 1
     incr row
 
     # Action buttons
     ttk::button $container.actions.validate -text "Validate Parameters" -command {::PETK::gui::validateSEMSetup}
     ttk::button $container.actions.generate -text "Preview Simulation" -command {::PETK::gui::runPreviewFromGUI}
     ttk::button $container.actions.visualize -text "Run Simulation" -command {::PETK::gui::runCalculationFromGUI}
-    # ttk::button $container.actions.export -text "Export Configuration" -command {::PETK::gui::exportMembraneConfig}
 
     grid $container.actions.validate $container.actions.generate $container.actions.visualize -sticky ew -padx 3
 
-    # Bind to update scroll region when content changes
-    bind $container <Configure> [list ::PETK::gui::updateScrollRegion $tab2.canvas $canvas_window]
+    # === ENHANCED RESIZE HANDLING ===
     
-    # Initialize variables and display
-
-    ::PETK::gui::updateMembraneTypeDisplay
-    ::PETK::gui::loadPoreImages
+    # Bind resize events for proper canvas expansion
+    bind $tab3.canvas <Configure> [list ::PETK::gui::onCanvasConfigured $tab3.canvas $canvas_window]
+    bind $container <Configure> [list ::PETK::gui::onContentConfigured $tab3.canvas $canvas_window]
     
-    # Update scroll region after initial content is loaded
-    after idle [list ::PETK::gui::updateScrollRegion $tab2.canvas $canvas_window]
+    # Store references for later use (with unique names for tab3)
+    set ::PETK::gui::tab3MainCanvas $tab3.canvas
+    set ::PETK::gui::tab3CanvasWindow $canvas_window
+    set ::PETK::gui::tab3ContentContainer $container
+    
+    # Initialize SEM variables
+    ::PETK::gui::initializeSEMVariables
+    
+    # Force proper sizing after everything is created
+    after idle [list ::PETK::gui::forceInitialCanvasResize $tab3.canvas $canvas_window]
 }
 
 ####################################################
-# Variable Initialization
+# Tab 3 Function
 ####################################################
 
-proc ::PETK::gui::initializeMembraneVariables {} {
-    # Initialize pore type
-    if {![info exists ::PETK::gui::membraneType]} {
-        set ::PETK::gui::membraneType "cylindrical"
-    }
+####################################################
+## SEM VARIABLE INITIALIZATION
+####################################################
+
+proc ::PETK::gui::initializeSEMVariables {} {
     
-    # Initialize cylindrical parameters
-    if {![info exists ::PETK::gui::cylindricalDiameter]} {
-        set ::PETK::gui::cylindricalDiameter "200.0"
+    # Simulation parameters
+    if {![info exists ::PETK::gui::appliedVoltage]} {
+        set ::PETK::gui::appliedVoltage "100"
     }
-    if {![info exists ::PETK::gui::cornerRadius]} {
-        set ::PETK::gui::cornerRadius "50.0"
-    }
-    
-    # Initialize double cone parameters
-    if {![info exists ::PETK::gui::innerDiameter]} {
-        set ::PETK::gui::innerDiameter "100.0"
-    }
-    if {![info exists ::PETK::gui::outerDiameter]} {
-        set ::PETK::gui::outerDiameter "300.0"
-    }
-    
-    # Initialize common parameters
-    if {![info exists ::PETK::gui::nanoporeThickness]} {
-        set ::PETK::gui::nanoporeThickness "200.0"
-    }
-    
-    # Initialize conductivity settings
     if {![info exists ::PETK::gui::bulkConductivity]} {
-        set ::PETK::gui::bulkConductivity "1.12"
+        set ::PETK::gui::bulkConductivity "1.0"
     }
     if {![info exists ::PETK::gui::membraneConductivity]} {
-        set ::PETK::gui::membraneConductivity "0.0001"
+        set ::PETK::gui::membraneConductivity "0.001"
     }
-    if {![info exists ::PETK::gui::sysCutoff]} {
-        set ::PETK::gui::sysCutoff "0.0"
+    
+    # Grid settings
+    if {![info exists ::PETK::gui::gridResolution]} {
+        set ::PETK::gui::gridResolution "2.0"
     }
-    if {![info exists ::PETK::gui::appliedVoltage]} {
-        set ::PETK::gui::appliedVoltage "100.0"
+    if {![info exists ::PETK::gui::estimatedGridPoints]} {
+        set ::PETK::gui::estimatedGridPoints "Not calculated"
     }
     if {![info exists ::PETK::gui::semUseVdWRadii]} {
         set ::PETK::gui::semUseVdWRadii 1
@@ -2040,165 +3088,26 @@ proc ::PETK::gui::initializeMembraneVariables {} {
     if {![info exists ::PETK::gui::semDefaultRadius]} {
         set ::PETK::gui::semDefaultRadius "1.5"
     }
-    # Initialize grid settings
-    if {![info exists ::PETK::gui::gridResolution]} {
-        set ::PETK::gui::gridResolution "2.0"
-    }
     
-    # Initialize box dimensions
-    if {![info exists ::PETK::gui::autoCalculateBoxDimensions]} {
-        set ::PETK::gui::autoCalculateBoxDimensions 1
-    }
-    if {![info exists ::PETK::gui::boxSizeX]} {
-        set ::PETK::gui::boxSizeX "300.0"
-    }
-    if {![info exists ::PETK::gui::boxSizeY]} {
-        set ::PETK::gui::boxSizeY "300.0"
-    }
-    if {![info exists ::PETK::gui::boxSizeZ]} {
-        set ::PETK::gui::boxSizeZ "300.0"
-    }
-    
-    # Initialize movement range for auto-calculation
+    # Movement parameters
     if {![info exists ::PETK::gui::zStartRange]} {
-        set ::PETK::gui::zStartRange "150.0"
+        set ::PETK::gui::zStartRange "-50.0"
     }
     if {![info exists ::PETK::gui::zEndRange]} {
-        set ::PETK::gui::zEndRange "-150.0"
+        set ::PETK::gui::zEndRange "50.0"
     }
     if {![info exists ::PETK::gui::zStep]} {
-        set ::PETK::gui::zStep "10.0"
-    }
-    if {![info exists ::PETK::gui::semPreviewFrames]} {
-        set ::PETK::gui::semPreviewFrames 5
+        set ::PETK::gui::zStep "2.0"
     }
     
-    # Initialize auto-calculated box display
-    if {![info exists ::PETK::gui::autoBoxX]} {
-        set ::PETK::gui::autoBoxX ""
-    }
-    if {![info exists ::PETK::gui::autoBoxY]} {
-        set ::PETK::gui::autoBoxY ""
-    }
-    if {![info exists ::PETK::gui::autoBoxZ]} {
-        set ::PETK::gui::autoBoxZ ""
-    }
-    
-    # Initialize output settings
-    if {![info exists ::PETK::gui::workdir]} {
-        if {[info exists ::PETK::gui::workdir] && $::PETK::gui::workdir ne ""} {
-            set ::PETK::gui::workdir $::PETK::gui::workdir
-        } else {
-            set ::PETK::gui::workdir [pwd]
-        }
-    }
-    if {![info exists ::PETK::gui::outputPrefix]} {
-        set ::PETK::gui::outputPrefix "vertical_movement"
-    }
-    
-    # Initialize display variables
-    if {![info exists ::PETK::gui::currentPoreType]} {
-        set ::PETK::gui::currentPoreType "Cylindrical"
-    }
-    if {![info exists ::PETK::gui::displayThickness]} {
-        set ::PETK::gui::displayThickness ""
-    }
-    if {![info exists ::PETK::gui::displayParam1]} {
-        set ::PETK::gui::displayParam1 ""
-    }
-    if {![info exists ::PETK::gui::displayParam2]} {
-        set ::PETK::gui::displayParam2 ""
-    }
-    if {![info exists ::PETK::gui::calculatedVolume]} {
-        set ::PETK::gui::calculatedVolume ""
-    }
-    if {![info exists ::PETK::gui::estimatedGridPoints]} {
-        set ::PETK::gui::estimatedGridPoints ""
-    }
-    
-    # Update display
-    ::PETK::gui::updateParameterDisplay
-    ::PETK::gui::calculateBoxDimensions
-    ::PETK::gui::estimateGridPoints
-}
-
-proc ::PETK::gui::initializeSEMVariables {} {
-    # Python environment variables
+    # Python environment
     if {![info exists ::PETK::gui::condaEnvironment]} {
-        set ::PETK::gui::condaEnvironment ""
+        set ::PETK::gui::condaEnvironment "base"
     }
     if {![info exists ::PETK::gui::pythonExecutable]} {
         set ::PETK::gui::pythonExecutable ""
     }
-    if {![info exists ::PETK::gui::pythonEnvStatus]} {
-        set ::PETK::gui::pythonEnvStatus "Not tested"
-    }
-    # Input files
-    if {![info exists ::PETK::gui::semAnalytePDB]} {
-        set ::PETK::gui::semAnalytePDB ""
-    }
-    # Validate Status 
-    if {![info exists ::PETK::gui::semValidationPassed]} {
-        set ::PETK::gui::semValidationPassed 0
-    }
-}
-
-proc ::PETK::gui::browseSEMAnalytePdb {} {
-    set pdbType { {{Protein Data Bank files} {.pdb}} {{All Files} *} }
-    set tempfile [tk_getOpenFile -title "Select Centered Analyte PDB File" -multiple 0 -filetypes $pdbType]
-    if {![string eq $tempfile ""]} {
-        set ::PETK::gui::semAnalytePDB $tempfile
-    }
-}
-
-proc ::PETK::gui::syncAnalyteFromTab1 {} {
-    # Get the output file from Tab 1 analysis if it exists
-    if {[info exists ::PETK::gui::outputFileStatus] && $::PETK::gui::outputFileStatus ne "Not created"} {
-        # Extract filename from status
-        if {[regexp {Saved: (.+)} $::PETK::gui::outputFileStatus match filename]} {
-            # Construct full path
-            if {[info exists ::PETK::gui::workdir] && $::PETK::gui::workdir ne ""} {
-                set fullpath [file join $::PETK::gui::workdir $filename]
-                if {[file exists $fullpath]} {
-                    set ::PETK::gui::semAnalytePDB $fullpath
-                    set ::PETK::gui::semCurrentStatus "Synced analyte from Tab 1: $filename"
-                    ::PETK::gui::updateSEMParameterSummary
-                    return
-                }
-            }
-        }
-    }
     
-    # Fallback to original PDB if centered version not available
-    if {[info exists ::PETK::gui::analytePDB] && $::PETK::gui::analytePDB ne ""} {
-        set ::PETK::gui::semAnalytePDB $::PETK::gui::analytePDB
-        set ::PETK::gui::semCurrentStatus "Using original PDB from Tab 1 (not centered)"
-    } else {
-        set ::PETK::gui::semCurrentStatus "No analyte PDB available in Tab 1"
-    }
-    ::PETK::gui::updateSEMParameterSummary
-}
-
-####################################################
-# Box Dimension Management Functions
-####################################################
-proc ::PETK::gui::toggleBoxDimensionMode {} {
-    set container $::PETK::gui::window.hlf.nb.tab2.canvas.content
-    
-    # Hide both frames first
-    catch {grid forget $container.boxdim.manual}
-    catch {grid forget $container.boxdim.auto_display}
-    
-    if {$::PETK::gui::autoCalculateBoxDimensions} {
-        # Show auto-calculated display
-        grid $container.boxdim.auto_display -row 1 -column 0 -columnspan 6 -sticky ew
-        ::PETK::gui::calculateBoxDimensions
-        ::PETK::gui::updateMembraneStatus "Switched to auto-calculated box dimensions"
-    } else {
-        # Show manual input fields
-        grid $container.boxdim.manual -row 1 -column 0 -columnspan 6 -sticky ew
-        ::PETK::gui::updateMembraneStatus "Switched to manual box dimensions"
-    }
 }
 
 proc ::PETK::gui::estimateGridPoints {} {
@@ -2242,317 +3151,6 @@ proc ::PETK::gui::estimateGridPoints {} {
     }
 }
 
-proc ::PETK::gui::calculateBoxDimensions {} {
-    if {!$::PETK::gui::autoCalculateBoxDimensions} {
-        return
-    }
-    
-    # Get pore radius based on type
-    set pore_radius 0.0
-    if {$::PETK::gui::membraneType eq "cylindrical"} {
-        if {[string is double $::PETK::gui::cylindricalDiameter]} {
-            set pore_radius [expr {$::PETK::gui::cylindricalDiameter / 2.0}]
-        }
-    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
-        if {[string is double $::PETK::gui::outerDiameter]} {
-            set pore_radius [expr {$::PETK::gui::outerDiameter / 2.0}]
-        }
-    }
-    
-    # Calculate XY dimensions based on pore size and padding
-    set padding $::PETK::gui::sysCutoff
-    set xy_size [expr {max(0.0, $pore_radius + 50.0 + $padding)}]
-    
-    # Calculate Z dimensions based on movement range and membrane
-    set membrane_half_thickness 0.0
-    if {[string is double $::PETK::gui::nanoporeThickness]} {
-        set membrane_half_thickness [expr {$::PETK::gui::nanoporeThickness / 2.0}]
-    }
-    
-    set z_start 0.0
-    set z_end 0.0
-    if {[string is double $::PETK::gui::zStartRange]} {
-        set z_start $::PETK::gui::zStartRange
-    }
-    if {[string is double $::PETK::gui::zEndRange]} {
-        set z_end $::PETK::gui::zEndRange
-    }
-    
-    set z_min [expr {min(-$membrane_half_thickness, $z_end)}]
-    set z_max [expr {max($membrane_half_thickness, $z_start)}]
-    
-    # Update display variables
-    set ::PETK::gui::autoBoxX [format "%.1f to %.1f (%.1f)" [expr {-$xy_size}] $xy_size [expr {2*$xy_size}]]
-    set ::PETK::gui::autoBoxY [format "%.1f to %.1f (%.1f)" [expr {-$xy_size}] $xy_size [expr {2*$xy_size}]]
-    set ::PETK::gui::autoBoxZ [format "%.1f to %.1f (%.1f)" $z_min $z_max [expr {$z_max - $z_min}]]
-    
-    # Store actual values for calculations
-    set ::PETK::gui::calculatedBoxSizeX [expr {2*$xy_size}]
-    set ::PETK::gui::calculatedBoxSizeY [expr {2*$xy_size}]
-    set ::PETK::gui::calculatedBoxSizeZ [expr {$z_max - $z_min}]
-    
-    ::PETK::gui::estimateGridPoints
-    
-    puts "Auto-calculated box dimensions:"
-    puts "  X: -$xy_size to $xy_size Å"
-    puts "  Y: -$xy_size to $xy_size Å"
-    puts "  Z: $z_min to $z_max Å"
-    puts "  Pore radius: $pore_radius Å"
-    puts "  Movement range: $z_end to $z_start Å"
-}
-
-####################################################
-# Pore Type Management Functions
-####################################################
-
-proc ::PETK::gui::updateMembraneTypeDisplay {} {
-    set container $::PETK::gui::window.hlf.nb.tab2.canvas.content
-    
-    # Hide all parameter frames first
-    catch {grid forget $container.params.cyl}
-    catch {grid forget $container.params.cone}
-    
-    if {$::PETK::gui::membraneType eq "cylindrical"} {
-        grid $container.params.cyl -row 1 -column 0 -columnspan 6 -sticky ew -pady 5
-        set ::PETK::gui::currentPoreType "Cylindrical"
-        ::PETK::gui::updateMembraneStatus "Switched to cylindrical pore mode"
-    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
-        grid $container.params.cone -row 1 -column 0 -columnspan 6 -sticky ew -pady 5
-        set ::PETK::gui::currentPoreType "Double Cone"
-        ::PETK::gui::updateMembraneStatus "Switched to double cone pore mode"
-    }
-    
-    ::PETK::gui::updateParameterDisplay
-    ::PETK::gui::updatePoreVisualization
-    ::PETK::gui::calculateBoxDimensions
-}
-
-proc ::PETK::gui::updateParameterDisplay {} {
-    set ::PETK::gui::displayThickness "$::PETK::gui::nanoporeThickness Å"
-    
-    if {$::PETK::gui::membraneType eq "cylindrical"} {
-        set ::PETK::gui::displayParam1 "Diameter: $::PETK::gui::cylindricalDiameter Å"
-        set ::PETK::gui::displayParam2 "Corner R: $::PETK::gui::cornerRadius Å"
-        
-        # Calculate cylindrical volume
-        if {[string is double $::PETK::gui::cylindricalDiameter] && [string is double $::PETK::gui::nanoporeThickness]} {
-            set radius [expr {$::PETK::gui::cylindricalDiameter / 2.0}]
-            set height $::PETK::gui::nanoporeThickness
-            set volume [expr {3.14159 * $radius * $radius * $height}]
-            set ::PETK::gui::calculatedVolume [format "%.1f Å³" $volume]
-        } else {
-            set ::PETK::gui::calculatedVolume "Invalid params"
-        }
-        
-    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
-        set ::PETK::gui::displayParam1 "Inner: $::PETK::gui::innerDiameter Å"
-        set ::PETK::gui::displayParam2 "Outer: $::PETK::gui::outerDiameter Å"
-        
-        # Calculate double cone volume (approximation)
-        if {[string is double $::PETK::gui::innerDiameter] && [string is double $::PETK::gui::outerDiameter] && [string is double $::PETK::gui::nanoporeThickness]} {
-            set r1 [expr {$::PETK::gui::innerDiameter / 2.0}]
-            set r2 [expr {$::PETK::gui::outerDiameter / 2.0}]
-            set h [expr {$::PETK::gui::nanoporeThickness / 2.0}]
-            # Volume of truncated cone: π/3 * h * (r1² + r1*r2 + r2²)
-            set volume [expr {3.14159/3.0 * $h * ($r1*$r1 + $r1*$r2 + $r2*$r2) * 2}]
-            set ::PETK::gui::calculatedVolume [format "%.1f Å³" $volume]
-        } else {
-            set ::PETK::gui::calculatedVolume "Invalid params"
-        }
-    }
-    
-    # Update box dimensions and grid points
-    ::PETK::gui::calculateBoxDimensions
-    ::PETK::gui::estimateGridPoints
-}
-
-proc ::PETK::gui::syncFromTab1 {} {
-    # Sync parameters from Tab 1 if they exist
-    if {[info exists ::PETK::gui::poreThickness] && $::PETK::gui::poreThickness ne ""} {
-        set ::PETK::gui::nanoporeThickness $::PETK::gui::poreThickness
-    }
-    
-    if {$::PETK::gui::membraneType eq "cylindrical"} {
-        if {[info exists ::PETK::gui::poreDiameter] && $::PETK::gui::poreDiameter ne ""} {
-            set ::PETK::gui::cylindricalDiameter $::PETK::gui::poreDiameter
-        }
-    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
-        if {[info exists ::PETK::gui::poreDiameter] && $::PETK::gui::poreDiameter ne ""} {
-            # Use pore diameter as inner diameter for double cone
-            set ::PETK::gui::innerDiameter $::PETK::gui::poreDiameter
-            # Set outer diameter to 1.5x inner diameter as a reasonable default
-            set ::PETK::gui::outerDiameter [expr {$::PETK::gui::poreDiameter * 1.5}]
-        }
-    }
-    
-    ::PETK::gui::updateParameterDisplay
-    ::PETK::gui::updateMembraneStatus "Parameters synced from Tab 1"
-}
-
-####################################################
-# Image Loading and Visualization Functions
-####################################################
-
-proc ::PETK::gui::loadPoreImages {} {
-    # Load pore shape images
-    set ::PETK::gui::poreImages(cylindrical) ""
-    set ::PETK::gui::poreImages(doublecone) ""
-    
-    # Try to load cylindrical pore image
-    set cyl_path "./shapes/shape2.gif"
-    if {[file exists $cyl_path]} {
-        if {[catch {
-            set ::PETK::gui::poreImages(cylindrical) [image create photo -file $cyl_path]
-        } error]} {
-            puts "Warning: Could not load cylindrical pore image: $error"
-        }
-    } else {
-        puts "Warning: Cylindrical pore image not found at: $cyl_path"
-    }
-    
-    # Try to load double cone pore image
-    set cone_path "./shapes/shape1.gif"
-    if {[file exists $cone_path]} {
-        if {[catch {
-            set ::PETK::gui::poreImages(doublecone) [image create photo -file $cone_path]
-        } error]} {
-            puts "Warning: Could not load double cone pore image: $error"
-        }
-    } else {
-        puts "Warning: Double cone pore image not found at: $cone_path"
-    }
-    
-    # Load initial image
-    ::PETK::gui::updatePoreVisualization
-}
-
-proc ::PETK::gui::updatePoreVisualization {} {
-    if {![info exists ::PETK::gui::poreImageCanvas] || ![winfo exists $::PETK::gui::poreImageCanvas]} {
-        return
-    }
-    
-    set canvas $::PETK::gui::poreImageCanvas
-    
-    # Clear previous image
-    $canvas delete all
-    
-    # Get current pore type image
-    set image_key $::PETK::gui::membraneType
-    
-    if {[info exists ::PETK::gui::poreImages($image_key)] && $::PETK::gui::poreImages($image_key) ne ""} {
-        set image $::PETK::gui::poreImages($image_key)
-        
-        # Get canvas and image dimensions
-        set canvas_width [winfo reqwidth $canvas]
-        set canvas_height [winfo reqheight $canvas]
-        if {$canvas_width <= 1} {set canvas_width 300}
-        if {$canvas_height <= 1} {set canvas_height 250}
-        
-        set img_width [image width $image]
-        set img_height [image height $image]
-        
-        # Calculate scaling to fit canvas while maintaining aspect ratio
-        set scale_x [expr {double($canvas_width) / $img_width}]
-        set scale_y [expr {double($canvas_height) / $img_height}]
-        set scale [expr {min($scale_x, $scale_y) * 0.8}]  ; # 80% of canvas size
-        
-        # Create scaled image if needed
-        if {$scale < 1.0} {
-            set new_width [expr {int($img_width * $scale)}]
-            set new_height [expr {int($img_height * $scale)}]
-            
-            set scaled_image [image create photo]
-            $scaled_image copy $image -subsample [expr {int(1.0/$scale)}]
-            
-            # Center the image on canvas
-            set x [expr {($canvas_width - $new_width) / 2}]
-            set y [expr {($canvas_height - $new_height) / 2}]
-            $canvas create image $x $y -anchor nw -image $scaled_image
-        } else {
-            # Center the original image
-            set x [expr {($canvas_width - $img_width) / 2}]
-            set y [expr {($canvas_height - $img_height) / 2}]
-            $canvas create image $x $y -anchor nw -image $image
-        }
-        
-    } else {
-        # Draw a simple schematic if no image available
-        ::PETK::gui::drawPoreSchematic $canvas
-    }
-    
-    # Add parameter labels on the image
-    # ::PETK::gui::addParameterLabels $canvas
-    ::PETK::gui::updateParameterDisplay
-}
-
-proc ::PETK::gui::drawPoreSchematic {canvas} {
-    set width [winfo reqwidth $canvas]
-    set height [winfo reqheight $canvas]
-    if {$width <= 1} {set width 300}
-    if {$height <= 1} {set height 250}
-    
-    set cx [expr {$width / 2}]
-    set cy [expr {$height / 2}]
-    
-    if {$::PETK::gui::membraneType eq "cylindrical"} {
-        # Draw cylindrical pore schematic
-        # Membrane (gray rectangles)
-        $canvas create rectangle 20 [expr {$cy-40}] [expr {$cx-30}] [expr {$cy+40}] -fill gray70 -outline black
-        $canvas create rectangle [expr {$cx+30}] [expr {$cy-40}] [expr {$width-20}] [expr {$cy+40}] -fill gray70 -outline black
-        
-        # Pore (white rectangle)
-        $canvas create rectangle [expr {$cx-30}] [expr {$cy-40}] [expr {$cx+30}] [expr {$cy+40}] -fill white -outline black
-        
-        # Labels
-        $canvas create text $cx [expr {$cy-60}] -text "Cylindrical Pore" -font {TkDefaultFont 10 bold}
-        $canvas create text 60 [expr {$cy-60}] -text "Membrane" -font {TkDefaultFont 9}
-        
-    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
-        # Draw double cone pore schematic
-        # Membrane (gray rectangles)
-        $canvas create rectangle 20 [expr {$cy-40}] [expr {$cx-40}] [expr {$cy+40}] -fill gray70 -outline black
-        $canvas create rectangle [expr {$cx+40}] [expr {$cy-40}] [expr {$width-20}] [expr {$cy+40}] -fill gray70 -outline black
-        
-        # Double cone pore (trapezoid)
-        set coords [list [expr {$cx-40}] [expr {$cy-40}] \
-                         [expr {$cx-15}] $cy \
-                         [expr {$cx-40}] [expr {$cy+40}] \
-                         [expr {$cx+40}] [expr {$cy+40}] \
-                         [expr {$cx+15}] $cy \
-                         [expr {$cx+40}] [expr {$cy-40}]]
-        $canvas create polygon $coords -fill white -outline black
-        
-        # Labels
-        $canvas create text $cx [expr {$cy-60}] -text "Double Cone Pore" -font {TkDefaultFont 10 bold}
-        $canvas create text 60 [expr {$cy-60}] -text "Membrane" -font {TkDefaultFont 9}
-    }
-}
-
-proc ::PETK::gui::addParameterLabels {canvas} {
-    set width [winfo reqwidth $canvas]
-    set height [winfo reqheight $canvas]
-    if {$width <= 1} {set width 300}
-    if {$height <= 1} {set height 250}
-    
-    # Add parameter annotations on the visualization
-    if {$::PETK::gui::membraneType eq "cylindrical"} {
-        $canvas create text [expr {$width-10}] 20 -text "D = $::PETK::gui::cylindricalDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
-        $canvas create text [expr {$width-10}] 35 -text "R = $::PETK::gui::cornerRadius Å" -anchor ne -font {TkDefaultFont 9} -fill blue
-        $canvas create text [expr {$width-10}] 50 -text "T = $::PETK::gui::nanoporeThickness Å" -anchor ne -font {TkDefaultFont 9} -fill blue
-    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
-        $canvas create text [expr {$width-10}] 20 -text "Inner = $::PETK::gui::innerDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
-        $canvas create text [expr {$width-10}] 35 -text "Outer = $::PETK::gui::outerDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
-        $canvas create text [expr {$width-10}] 50 -text "T = $::PETK::gui::nanoporeThickness Å" -anchor ne -font {TkDefaultFont 9} -fill blue
-    }
-}
-
-proc ::PETK::gui::updateMembraneStatus {message} {
-    if {[info exists ::PETK::gui::membraneStatusLabel] && [winfo exists $::PETK::gui::membraneStatusLabel]} {
-        $::PETK::gui::membraneStatusLabel configure -text $message
-        update
-    }
-    puts "PETK Membrane Status: $message"
-}
 
 ####################################################
 # Parameter Summary Functions
@@ -3051,7 +3649,7 @@ proc ::PETK::gui::validateSEMSetup {} {
     # Check numeric parameters that must be positive
     set positive_params {
         {cylindricalDiameter "Pore diameter"}
-        {poreThickness "Membrane thickness"}
+        {nanoporeThickness "Membrane thickness"}
         {zStep "Z step size"}
         {appliedVoltage "Applied voltage"}
         {bulkConductivity "Bulk conductivity"}
@@ -3294,14 +3892,7 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
     set output_dir [file dirname $output_file]
     if {$::PETK::gui::semAnalytePDB ne ""} {
         set pdb_relative [file tail $::PETK::gui::semAnalytePDB]
-        # If PDB is in same directory as config, use relative path
-        if {[file dirname $::PETK::gui::semAnalytePDB] eq $output_dir} {
-            set pdb_path "../$pdb_relative"
-        } else {
-            set pdb_path $::PETK::gui::semAnalytePDB
-        }
-    } else {
-        set pdb_path "./your_analyte.pdb"
+        set pdb_path "../$pdb_relative"
     }
     
     # Helper function to parse box dimension ranges
@@ -3349,7 +3940,7 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
         append json_content "    \"outer_radius\": $outer_radius,\n"
     }
     
-    append json_content "    \"membrane_thickness\": $::PETK::gui::poreThickness\n"
+    append json_content "    \"membrane_thickness\": $::PETK::gui::nanoporeThickness\n"
     append json_content "  },\n"
     
     # Simulation section
@@ -3417,88 +4008,261 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
 }
 
 proc ::PETK::gui::runPreviewFromGUI {} {
+    # Run a preview simulation by generating a DCD trajectory showing
+    # the analyte moving from zStartRange to zEndRange.
+    # Uses corrected VMD animate syntax.
     
-    # Generate config
-    ::PETK::gui::outputParametersToConfig
+    puts "=== SEM PREVIEW SIMULATION ==="
     
-    # Run preview
-    set config_file [file join $::PETK::gui::workdir "config.json"]
-    ::PETK::gui::run_sem_preview $config_file
+    # Use the stored analyte molecule ID
+    set analyte_molid $::PETK::gui::analyteMol
+    puts "Using stored analyte molecule ID: $analyte_molid"
+    puts "Analyte name: [molinfo $analyte_molid get name]"
+    
+    # Get movement parameters
+    set z_start [expr double($::PETK::gui::zStartRange)]
+    set z_end [expr double($::PETK::gui::zEndRange)]
+    set z_step [expr double($::PETK::gui::zStep)]
+    
+    # Calculate trajectory parameters
+    set num_frames [expr int(abs($z_end - $z_start) / $z_step) + 1]
+    set direction [expr {$z_end > $z_start ? 1 : -1}]
+    
+    puts "Generating trajectory: $num_frames frames from $z_start to $z_end Å"
+    puts "Direction: [expr {$direction > 0 ? "forward (+Z)" : "reverse (-Z)"}]"
+    puts "Step size: $z_step Å"
+    
+    # Generate the trajectory using corrected syntax
+    if {[::PETK::gui::generateSEMTrajectory $analyte_molid $z_start $z_end $z_step]} {
+        # Load and play the trajectory
+        ::PETK::gui::loadAndPlaySEMTrajectory $analyte_molid
+        
+        # Update the molecule name to indicate it now has a trajectory
+        mol rename $analyte_molid "Analyte: [file tail $::PETK::gui::analytePDB] (SEM Preview)"
+        
+        tk_messageBox -type ok -icon info -title "Preview Ready" \
+            -message "SEM preview trajectory generated successfully!\n\nFrames: $num_frames\nRange: $z_start to $z_end Å\nStep: $z_step Å\n\nUse the playback controls to view the simulation."
+    }
 }
 
-proc ::PETK::gui::run_sem_preview  {config_file} {
-    # Check if validation has passed
-    if {![info exists ::PETK::gui::semValidationPassed] || $::PETK::gui::semValidationPassed != 1} {
-        set error_msg "Cannot run preview: SEM setup validation has not passed.\nPlease run validation first and fix any errors."
-        puts $error_msg
-        tk_messageBox -icon error -title "Preview Error" -message $error_msg
-        return -code error $error_msg
-    }
+proc ::PETK::gui::getAnalyteMoleculeID {} {
+    # Find the molecule ID of the loaded analyte using the stored variable.
+    # This is much more reliable than searching by filename.
+    #
+    # Returns:
+    #   Molecule ID or -1 if not found/invalid
     
-    # Create preview folder in workdir
-    set preview_dir [file join $::PETK::gui::workdir "preview"]
-    
-    # Create the preview directory if it doesn't exist
-    if {![file exists $preview_dir]} {
-        file mkdir $preview_dir
-        puts "Created preview directory: $preview_dir"
-    } else {
-        puts "Preview directory already exists: $preview_dir"
-    }
-    
-    # Change to preview directory
-    set original_dir [pwd]
-    cd $preview_dir
-    puts "Changed to preview directory: [pwd]"
-    
-    # Copy config file to preview directory if it's not already there
-    set config_basename [file tail $config_file]
-    set local_config [file join $preview_dir $config_basename]
-    
-    if {![file exists $local_config] || [file mtime $config_file] > [file mtime $local_config]} {
-        file copy -force $config_file $local_config
-        puts "Copied config file to preview directory"
-    }
-    
-    # Construct the command to run SEM preview
-    set sem_script_path [file join $::PETK::gui::workdir "vertical_movement_sem.py"]
-    set cmd [list conda run -n $::PETK::gui::condaEnvironment python $sem_script_path $config_basename preview_only]
-    
-    puts "Running SEM preview with command: $cmd"
-    puts "----------------------------------------"
-    
-    # Execute the command and capture output
-    if {[catch {
-        set result [exec {*}$cmd 2>&1]
-        puts $result
-        puts "----------------------------------------"
-        puts "SEM preview completed successfully!"
+    # First check if we have the stored molecule ID
+    if {[info exists ::PETK::gui::analyteMol]} {
+        set molid $::PETK::gui::analyteMol
         
-        # List generated files
-        set preview_files [glob -nocomplain "*.png" "*.dat"]
-        if {[llength $preview_files] > 0} {
-            puts "Generated files:"
-            foreach file $preview_files {
-                puts "  - $file"
+        # Verify the molecule still exists in VMD
+        if {[lsearch [molinfo list] $molid] != -1} {
+            # Double-check that it's actually loaded with frames
+            if {[molinfo $molid get numframes] > 0} {
+                puts "Found analyte molecule: ID $molid ([molinfo $molid get name])"
+                return $molid
+            } else {
+                puts "Warning: Analyte molecule $molid exists but has no frames"
             }
         } else {
-            puts "No preview files found"
+            puts "Warning: Stored analyte molecule ID $molid no longer exists in VMD"
         }
-        
-    } error]} {
-        puts "Error running SEM preview:"
-        puts $error
-        cd $original_dir
-        return -code error $error
+    } else {
+        puts "Warning: No analyte molecule ID stored in ::PETK::gui::analyteMol"
     }
     
-    # Return to original directory
-    cd $original_dir
-    puts "Returned to original directory: [pwd]"
+    # Fallback: Look for a molecule with "Analyte:" in the name
+    set mollist [molinfo list]
+    foreach molid $mollist {
+        set molname [molinfo $molid get name]
+        if {[string match "Analyte:*" $molname]} {
+            puts "Found analyte by name match: ID $molid ($molname)"
+            return $molid
+        }
+    }
     
-    return $preview_dir
+    # Final fallback: Look for any molecule that matches the PDB filename
+    if {[info exists ::PETK::gui::analytePDB] && $::PETK::gui::analytePDB ne ""} {
+        foreach molid $mollist {
+            set filename [molinfo $molid get filename]
+            if {[string match "*[file tail $::PETK::gui::analytePDB]*" $filename]} {
+                puts "Found analyte by filename match: ID $molid"
+                return $molid
+            }
+        }
+    }
+    
+    puts "Error: Could not find analyte molecule in VMD"
+    return -1
 }
 
+proc ::PETK::gui::generateSEMTrajectory {molid z_start z_end z_step} {
+    # Generate a DCD trajectory file with the analyte moving vertically.
+    # Uses correct VMD animate command syntax based on official documentation.
+    #
+    # Args:
+    #   molid: VMD molecule ID
+    #   z_start: Starting Z position
+    #   z_end: Ending Z position  
+    #   z_step: Step size
+    #
+    # Returns:
+    #   1 if successful, 0 if failed
+    
+    # Use success flag to avoid catch/return interaction
+    set success 0
+    
+    if {[catch {
+        # Create output directory if it doesn't exist
+        set output_dir [file join $::PETK::gui::workdir "sem_preview"]
+        file mkdir $output_dir
+        
+        # Output files
+        set dcd_file [file join $output_dir "analyte_trajectory.dcd"]
+        set pdb_file [file join $output_dir "analyte_trajectory.pdb"]
+        
+        puts "Generating trajectory files:"
+        puts "  PDB: $pdb_file"
+        puts "  DCD: $dcd_file"
+        
+        # Get original coordinates
+        set all_atoms [atomselect $molid "all"]
+        set original_coords [$all_atoms get {x y z}]
+        set num_atoms [$all_atoms num]
+        
+        # Calculate center of mass in Z
+        set com_z [lindex [measure center $all_atoms] 2]
+        puts "Original center of mass Z: $com_z Å"
+        
+        # Calculate trajectory parameters
+        set direction [expr {$z_end > $z_start ? 1 : -1}]
+        set num_frames [expr int(abs($z_end - $z_start) / $z_step) + 1]
+        
+        puts "Trajectory parameters:"
+        puts "  Frames: $num_frames"
+        puts "  Direction: [expr {$direction > 0 ? "forward" : "reverse"}]"
+        puts "  Step size: $z_step Å"
+        
+        # Delete existing frames except the first one
+        set current_frames [molinfo $molid get numframes]
+        if {$current_frames > 1} {
+            animate delete beg 1 end -1 $molid
+        }
+        
+        # Generate frames
+        for {set frame 0} {$frame < $num_frames} {incr frame} {
+            # Calculate Z position for this frame
+            set current_z [expr $z_start + ($frame * $z_step * $direction)]
+            set z_offset [expr $current_z - $com_z]
+            
+            if {$frame > 0} {
+                # Add a new frame by duplicating the current frame
+                animate dup $molid
+            }
+            
+            # Move to the new frame
+            animate goto $frame
+            
+            # Get atom selection for current frame
+            set frame_atoms [atomselect $molid "all" frame $frame]
+            
+            # Reset to original coordinates first
+            $frame_atoms set {x y z} $original_coords
+            
+            # Apply Z translation
+            $frame_atoms moveby [list 0 0 $z_offset]
+            
+            $frame_atoms delete
+            
+            puts "  Frame [expr $frame + 1]/$num_frames: Z = [format "%.2f" $current_z] Å"
+        }
+        
+        # Write trajectory files
+        puts "Writing trajectory files..."
+        
+        # Write PDB (frame 0 as reference)
+        animate goto 0
+        $all_atoms writepdb $pdb_file
+        
+        # Write DCD trajectory
+        animate write dcd $dcd_file beg 0 end -1 $molid
+        
+        $all_atoms delete
+        
+        # Store trajectory info for later use
+        set ::PETK::gui::currentTrajectoryDCD $dcd_file
+        set ::PETK::gui::currentTrajectoryPDB $pdb_file
+        set ::PETK::gui::currentTrajectoryFrames $num_frames
+        
+        puts "Trajectory generation completed successfully!"
+        
+        # Set success flag instead of returning
+        set success 1
+        
+    } error]} {
+        puts "ERROR generating trajectory: $error"
+        tk_messageBox -type ok -icon error -title "Trajectory Generation Failed" \
+            -message "Failed to generate trajectory:\n\n$error"
+        set success 0
+    }
+    
+    # Return success status outside the catch block
+    return $success
+}
+
+proc ::PETK::gui::loadAndPlaySEMTrajectory {molid} {
+    # Load the generated trajectory and set up for playback.
+    # Uses correct VMD syntax.
+    #
+    # Args:
+    #   molid: VMD molecule ID
+    
+    if {![info exists ::PETK::gui::currentTrajectoryDCD]} {
+        puts "No trajectory file to load"
+        return
+    }
+    
+    if {[catch {
+        # First, delete any existing trajectory frames from the molecule (keep frame 0)
+        set current_frames [molinfo $molid get numframes]
+        if {$current_frames > 1} {
+            animate delete beg 1 end -1 $molid
+        }
+        
+        # Load the DCD file
+        animate read dcd $::PETK::gui::currentTrajectoryDCD $molid
+        
+        puts "Trajectory loaded: [molinfo $molid get numframes] frames"
+        
+        # Set up display
+        animate goto 0
+        display update
+        
+        # Center the view
+        display resetview
+        
+        # Set up nice representations if needed
+        set num_reps [molinfo $molid get numreps]
+        if {$num_reps == 0} {
+            mol representation NewCartoon
+            mol color ColorID 0
+            mol addrep $molid
+            
+            mol representation VDW 0.3
+            mol color Element
+            mol selection "not protein"
+            mol addrep $molid
+        }
+        
+        puts "Trajectory display configured"
+        
+    } error]} {
+        puts "ERROR loading trajectory: $error"
+        tk_messageBox -type ok -icon error -title "Trajectory Load Failed" \
+            -message "Failed to load trajectory:\n\n$error"
+    }
+}
 proc ::PETK::gui::runCalculationFromGUI {} {
     # Generate config
     ::PETK::gui::outputParametersToConfig
@@ -3597,18 +4361,93 @@ proc ::PETK::gui::run_sem_calculation {config_file} {
 # Scroll Region Update Function (from Tab 2)
 ####################################################
 
-proc ::PETK::gui::updateScrollRegion {canvas canvas_window} {
-    # Update the canvas scroll region to encompass all content
-    update idletasks
-    set bbox [$canvas bbox all]
-    if {$bbox ne ""} {
-        $canvas configure -scrollregion $bbox
+proc ::PETK::gui::onCanvasConfigured {canvas canvas_window} {
+    set canvas_width [winfo width $canvas]
+    set canvas_height [winfo height $canvas]
+    
+    # Skip if canvas not ready
+    if {$canvas_width <= 1 || $canvas_height <= 1} {
+        return
     }
     
-    # Configure the canvas window width to match canvas width
-    set canvas_width [winfo width $canvas]
-    if {$canvas_width > 1} {
-        $canvas itemconfig $canvas_window -width $canvas_width
-    }
+    # Update content frame sizing
+    ::PETK::gui::resizeCanvasContent $canvas $canvas_window
 }
 
+proc ::PETK::gui::onContentConfigured {canvas canvas_window} {
+    after idle [list ::PETK::gui::resizeCanvasContent $canvas $canvas_window]
+}
+
+proc ::PETK::gui::resizeCanvasContent {canvas canvas_window} {
+    # Get the content frame widget
+    set content_frame [lindex [$canvas itemcget $canvas_window -window] 0]
+    
+    if {![winfo exists $content_frame]} {
+        return
+    }
+    
+    update idletasks
+    
+    # Get current dimensions
+    set canvas_width [winfo width $canvas]
+    set content_req_width [winfo reqwidth $content_frame]
+    set content_req_height [winfo reqheight $content_frame]
+    
+    # Skip if canvas not sized yet
+    if {$canvas_width <= 1} {
+        return
+    }
+    
+    # Make content frame fill the canvas width (minus padding for scrollbar)
+    set target_width [expr {$canvas_width - 5}]
+    if {$target_width < $content_req_width} {
+        set target_width $content_req_width
+    }
+    
+    # Configure the canvas window item to use the calculated width
+    $canvas itemconfig $canvas_window -width $target_width
+    
+    # Update the scroll region
+    $canvas configure -scrollregion [list 0 0 $target_width $content_req_height]
+}
+
+proc ::PETK::gui::forceInitialCanvasResize {canvas canvas_window} {
+    # Force initial update
+    update idletasks
+    
+    # Call resize function
+    ::PETK::gui::resizeCanvasContent $canvas $canvas_window
+    
+    # Schedule additional updates to ensure proper sizing
+    after 100 [list ::PETK::gui::resizeCanvasContent $canvas $canvas_window]
+    after 500 [list ::PETK::gui::resizeCanvasContent $canvas $canvas_window]
+}
+
+# === NOTEBOOK HIERARCHY FIX ===
+proc ::PETK::gui::fixNotebookExpansion {} {
+    # Fix the entire widget hierarchy for proper expansion
+    
+    # Main window
+    catch {grid rowconfigure .petk_main_window 0 -weight 1}
+    catch {grid columnconfigure .petk_main_window 0 -weight 1}
+    
+    # HLF frame 
+    catch {grid rowconfigure .petk_main_window.hlf 0 -weight 1}
+    catch {grid columnconfigure .petk_main_window.hlf 0 -weight 1}
+    
+    # Notebook
+    set nb .petk_main_window.hlf.nb
+    catch {
+        grid $nb -sticky nsew
+        grid rowconfigure $nb 0 -weight 1
+        grid columnconfigure $nb 0 -weight 1
+    }
+    
+    puts "Applied notebook expansion fix"
+}
+
+# === CONVENIENCE FUNCTION ===
+proc ::PETK::gui::updateScrollRegion {canvas canvas_window} {
+    # This maintains compatibility with your existing code
+    ::PETK::gui::resizeCanvasContent $canvas $canvas_window
+}
