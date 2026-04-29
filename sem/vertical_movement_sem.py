@@ -110,9 +110,11 @@ class VerticalMovementSEM:
     
     def __init__(self, 
                  moving_pdb,        # Centered analyte
-                 pore_type="cylindrical",  # "cylindrical", "double_cone", "biological", or "bin_file"
+                 pore_type="cylindrical",  # "cylindrical", "double_cone", "conical", "biological", or "bin_file"
                  pore_radius=100.0,  # Pore radius (Å) - for cylindrical or inner radius for double cone
                  outer_radius=None,  # Outer radius for double cone (Å) - if None, uses pore_radius * 1.5
+                 top_radius=None,    # Top-face radius for conical pore (Å)
+                 bottom_radius=None, # Bottom-face radius for conical pore (Å)
                  corner_radius=0.0,  # Corner radius for cylindrical pore (Å)
                  biological_pore_pdb=None,  # Path to PDB file for biological pore
                  bin_file_path=None,  # Path to binary file for bin_file pore
@@ -166,6 +168,8 @@ class VerticalMovementSEM:
         self.pore_type = pore_type.lower()
         self.pore_radius = pore_radius
         self.outer_radius = outer_radius if outer_radius is not None else pore_radius * 1.5
+        self.top_radius = top_radius
+        self.bottom_radius = bottom_radius
         self.corner_radius = corner_radius
         self.biological_pore_pdb = biological_pore_pdb
         self.bin_file_path = bin_file_path
@@ -546,10 +550,10 @@ class VerticalMovementSEM:
         
         # Create pore object
         pore_kwargs = {}
-        if self.pore_type in ["cylindrical", "double_cone", "biological"]:
+        if self.pore_type in ["cylindrical", "double_cone", "conical", "biological"]:
             pore_kwargs['bulk_conductivity'] = self.bulk_conductivity
             pore_kwargs['membrane_conductivity'] = self.membrane_conductivity
-        
+
         if self.pore_type == "cylindrical":
             pore_kwargs.update({
                 'pore_radius': self.pore_radius,
@@ -560,6 +564,16 @@ class VerticalMovementSEM:
             pore_kwargs.update({
                 'inner_radius': self.pore_radius,
                 'outer_radius': self.outer_radius,
+                'membrane_half_thickness': self.membrane_thickness / 2
+            })
+        elif self.pore_type == "conical":
+            if self.top_radius is None or self.bottom_radius is None:
+                raise ValueError(
+                    "Conical pore requires both top_radius and bottom_radius."
+                )
+            pore_kwargs.update({
+                'top_radius': self.top_radius,
+                'bottom_radius': self.bottom_radius,
                 'membrane_half_thickness': self.membrane_thickness / 2
             })
         elif self.pore_type == "bin_file":

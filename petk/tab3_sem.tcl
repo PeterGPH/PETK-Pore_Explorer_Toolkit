@@ -672,7 +672,11 @@ proc ::PETK::gui::updateSEMParameterSummary {} {
     } elseif {$pore_type eq "double_cone" || $pore_type eq "doublecone"} {
         $widget insert end "  Inner Diameter: $::PETK::gui::innerDiameter Å\n"
         $widget insert end "  Outer Diameter: $::PETK::gui::outerDiameter Å\n"
-        
+
+    } elseif {$pore_type eq "conical"} {
+        $widget insert end "  Top Diameter: $::PETK::gui::topDiameter Å\n"
+        $widget insert end "  Bottom Diameter: $::PETK::gui::bottomDiameter Å\n"
+
     } elseif {$pore_type eq "biological"} {
         if {[info exists ::PETK::gui::selectedBioPore] && $::PETK::gui::selectedBioPore ne ""} {
             $widget insert end "  Biological Pore PDB: [file tail $::PETK::gui::selectedBioPore]\n"
@@ -1566,11 +1570,14 @@ proc ::PETK::gui::validateSEMSetup {} {
     
     # Add pore-specific positive parameters based on pore type
     if {[info exists ::PETK::gui::currentPoreType]} {
-        if {$::PETK::gui::currentPoreType eq "cylindrical"} {
+        if {$::PETK::gui::currentPoreType eq "cylindrical" || $::PETK::gui::currentPoreType eq "Cylindrical"} {
             lappend positive_params {cylindricalDiameter "Pore diameter"}
-        } elseif {$::PETK::gui::currentPoreType eq "double_cone"} {
+        } elseif {$::PETK::gui::currentPoreType eq "double_cone" || $::PETK::gui::currentPoreType eq "Double Cone"} {
             lappend positive_params {innerDiameter "Inner diameter"}
             lappend positive_params {outerDiameter "Outer diameter"}
+        } elseif {$::PETK::gui::currentPoreType eq "conical" || $::PETK::gui::currentPoreType eq "Conical"} {
+            lappend positive_params {topDiameter "Top diameter"}
+            lappend positive_params {bottomDiameter "Bottom diameter"}
         }
         # For biological pores, diameter parameters are not needed as they come from the PDB
     }
@@ -1849,6 +1856,7 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
     switch -- $pore_type {
         "doublecone" { set pore_type "double_cone" }
         "double_cone" { set pore_type "double_cone" }
+        "conical" { set pore_type "conical" }
         "biological" - "bin_file" - "cylindrical" {}
         default { set pore_type "cylindrical" }
     }
@@ -1882,7 +1890,22 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
         append json_content "    \"pore_radius\": $inner_radius,\n"
         append json_content "    \"outer_radius\": $outer_radius,\n"
         append json_content "    \"membrane_thickness\": $::PETK::gui::nanoporeThickness\n"
-        
+
+    } elseif {$pore_type eq "conical"} {
+        set top_diameter $::PETK::gui::topDiameter
+        set bottom_diameter $::PETK::gui::bottomDiameter
+        if {![string is double -strict $top_diameter]} {
+            set top_diameter 240.0
+        }
+        if {![string is double -strict $bottom_diameter]} {
+            set bottom_diameter 120.0
+        }
+        set top_radius [expr {$top_diameter / 2.0}]
+        set bottom_radius [expr {$bottom_diameter / 2.0}]
+        append json_content "    \"top_radius\": $top_radius,\n"
+        append json_content "    \"bottom_radius\": $bottom_radius,\n"
+        append json_content "    \"membrane_thickness\": $::PETK::gui::nanoporeThickness\n"
+
     } elseif {$pore_type eq "biological"} {
         # Handle biological pore PDB path with robust file location logic
         set bio_pore_path ""

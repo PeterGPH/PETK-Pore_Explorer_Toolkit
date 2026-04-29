@@ -61,6 +61,8 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
     # Type-specific parameters
     corner_radius = pore_geom.get("corner_radius", 0.0)
     outer_radius = pore_geom.get("outer_radius", None)
+    top_radius = pore_geom.get("top_radius", None)
+    bottom_radius = pore_geom.get("bottom_radius", None)
     biological_pore_pdb = pore_geom.get("biological_pore_pdb", None)
     bin_file_path = pore_geom.get("bin_file_path", None)
     bin_file_units = pore_geom.get("bin_file_units", "distance").lower()
@@ -136,6 +138,8 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
         pore_type=pore_type,
         pore_radius=pore_radius,
         outer_radius=outer_radius,
+        top_radius=top_radius,
+        bottom_radius=bottom_radius,
         corner_radius=corner_radius,
         biological_pore_pdb=biological_pore_pdb,
         bin_file_path=bin_file_path,
