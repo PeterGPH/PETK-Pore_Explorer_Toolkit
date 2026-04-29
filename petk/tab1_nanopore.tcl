@@ -3971,25 +3971,107 @@ proc ::PETK::gui::drawSolidStatePore {min_x max_x min_y max_y min_z max_z xbox y
         for {set angle 0} {$angle < 360} {incr angle 20} {
             set angle_rad [expr $angle * 3.14159 / 180.0]
             set next_angle_rad [expr ($angle + 20) * 3.14159 / 180.0]
-            
+
             # Outer radius points
             set x1_out [expr $outer_radius * cos($angle_rad)]
             set y1_out [expr $outer_radius * sin($angle_rad)]
             set x2_out [expr $outer_radius * cos($next_angle_rad)]
             set y2_out [expr $outer_radius * sin($next_angle_rad)]
-            
-            # Inner radius points  
+
+            # Inner radius points
             set x1_in [expr $inner_radius * cos($angle_rad)]
             set y1_in [expr $inner_radius * sin($angle_rad)]
             set x2_in [expr $inner_radius * cos($next_angle_rad)]
             set y2_in [expr $inner_radius * sin($next_angle_rad)]
-            
+
             # Draw cone outline
             draw line [list $x1_out $y1_out $pore_start_z] [list $x2_out $y2_out $pore_start_z] width 4
             draw line [list $x1_in $y1_in $middle_z] [list $x2_in $y2_in $middle_z] width 4
             draw line [list $x1_out $y1_out $pore_start_z] [list $x1_in $y1_in $middle_z] width 4
             draw line [list $x1_in $y1_in $middle_z] [list $x1_out $y1_out $pore_end_z] width 4
             draw line [list $x1_out $y1_out $pore_end_z] [list $x2_out $y2_out $pore_end_z] width 4
+        }
+
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        # Draw membrane with single truncated-cone (frustum) hole.
+        # top_radius is at z = pore_end_z (+half_thickness),
+        # bottom_radius is at z = pore_start_z (-half_thickness).
+        set top_radius [expr $::PETK::gui::topDiameter / 2.0]
+        set bottom_radius [expr $::PETK::gui::bottomDiameter / 2.0]
+        set max_radius [expr {max($top_radius, $bottom_radius)}]
+
+        # Add visual warning if configuration is invalid
+        if {[string match "*INVALID*" $::PETK::gui::poreValidityStatus]} {
+            draw color red
+            draw material Transparent
+            set warn_radius [expr $max_radius + 10.0]
+
+            for {set angle 0} {$angle < 360} {incr angle 30} {
+                set angle_rad [expr $angle * 3.14159 / 180.0]
+                set next_angle_rad [expr ($angle + 30) * 3.14159 / 180.0]
+                set x1 [expr $warn_radius * cos($angle_rad)]
+                set y1 [expr $warn_radius * sin($angle_rad)]
+                set x2 [expr $warn_radius * cos($next_angle_rad)]
+                set y2 [expr $warn_radius * sin($next_angle_rad)]
+
+                draw line [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z] width 4
+                draw line [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z] width 4
+            }
+
+            draw color purple
+            draw material Opaque
+        }
+
+        # Draw membrane as rectangular sheets with a frustum hole.
+        # On the bottom face (z = pore_start_z) the hole has radius bottom_radius.
+        # On the top face (z = pore_end_z) the hole has radius top_radius.
+        set grid_size 5.0
+        for {set x $min_x} {$x < $max_x} {set x [expr $x + $grid_size]} {
+            for {set y $min_y} {$y < $max_y} {set y [expr $y + $grid_size]} {
+                set x1 $x
+                set x2 [expr min($x + $grid_size, $max_x)]
+                set y1 $y
+                set y2 [expr min($y + $grid_size, $max_y)]
+
+                set cx [expr ($x1 + $x2) / 2.0]
+                set cy [expr ($y1 + $y2) / 2.0]
+                set distance [expr sqrt($cx*$cx + $cy*$cy)]
+
+                # Bottom face — hole has radius bottom_radius
+                if {$distance > $bottom_radius} {
+                    draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z]
+                    draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z] [list $x1 $y2 $pore_start_z]
+                }
+
+                # Top face — hole has radius top_radius
+                if {$distance > $top_radius} {
+                    draw triangle [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z] [list $x2 $y1 $pore_end_z]
+                    draw triangle [list $x1 $y1 $pore_end_z] [list $x1 $y2 $pore_end_z] [list $x2 $y2 $pore_end_z]
+                }
+            }
+        }
+
+        # Draw the frustum outline in yellow.
+        draw color yellow
+        set angle_step 20
+        for {set angle 0} {$angle < 360} {incr angle $angle_step} {
+            set angle_rad [expr $angle * 3.14159 / 180.0]
+            set next_angle_rad [expr ($angle + $angle_step) * 3.14159 / 180.0]
+
+            set xt1 [expr $top_radius * cos($angle_rad)]
+            set yt1 [expr $top_radius * sin($angle_rad)]
+            set xt2 [expr $top_radius * cos($next_angle_rad)]
+            set yt2 [expr $top_radius * sin($next_angle_rad)]
+
+            set xb1 [expr $bottom_radius * cos($angle_rad)]
+            set yb1 [expr $bottom_radius * sin($angle_rad)]
+            set xb2 [expr $bottom_radius * cos($next_angle_rad)]
+            set yb2 [expr $bottom_radius * sin($next_angle_rad)]
+
+            # Top circle (at +half), bottom circle (at -half), and the slanted wall.
+            draw line [list $xt1 $yt1 $pore_end_z]   [list $xt2 $yt2 $pore_end_z]   width 4
+            draw line [list $xb1 $yb1 $pore_start_z] [list $xb2 $yb2 $pore_start_z] width 4
+            draw line [list $xb1 $yb1 $pore_start_z] [list $xt1 $yt1 $pore_end_z]   width 4
         }
     }
     
@@ -4148,7 +4230,7 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
     } elseif {$::PETK::gui::membraneType eq "doublecone"} {
         set inner_radius [expr $::PETK::gui::innerDiameter / 2.0]
         set outer_radius [expr $::PETK::gui::outerDiameter / 2.0]
-        
+
         # Check inner radius
         if {$inner_radius > $min_box_half_xy} {
             set is_valid 0
@@ -4156,7 +4238,7 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
             lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
             lappend critical_errors "  Required: inner radius < $min_box_half_xy Å"
         }
-        
+
         # Check outer radius (more critical)
         if {$outer_radius > $min_box_half_xy} {
             set is_valid 0
@@ -4167,7 +4249,23 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
             lappend warnings "Outer radius ($outer_radius Å) > 80% of minimum box half-dimension"
             lappend warnings "  Consider increasing box size for better simulation quality"
         }
-        
+
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        set top_radius [expr $::PETK::gui::topDiameter / 2.0]
+        set bottom_radius [expr $::PETK::gui::bottomDiameter / 2.0]
+        set max_radius [expr {max($top_radius, $bottom_radius)}]
+
+        # The widest mouth is what matters for box-fit
+        if {$max_radius > $min_box_half_xy} {
+            set is_valid 0
+            lappend critical_errors "Max pore radius ($max_radius Å) > minimum box half-dimension ($min_box_half_xy Å)"
+            lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
+            lappend critical_errors "  Required: max(top, bottom) radius < $min_box_half_xy Å"
+        } elseif {$max_radius > [expr 0.8 * $min_box_half_xy]} {
+            lappend warnings "Max pore radius ($max_radius Å) > 80% of minimum box half-dimension"
+            lappend warnings "  Consider increasing box size for better simulation quality"
+        }
+
     }
     
     # 3. ADDITIONAL GEOMETRIC VALIDATIONS
@@ -4194,6 +4292,12 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
                 lappend warnings "Limited space around pore: only $available_space Å"
                 lappend warnings "  Recommended minimum: $min_spacing Å for proper solvation"
             }
+        } elseif {$::PETK::gui::membraneType eq "conical"} {
+            set available_space [expr $min_box_half_xy - $max_radius]
+            if {$available_space < $min_spacing} {
+                lappend warnings "Limited space around pore: only $available_space Å"
+                lappend warnings "  Recommended minimum: $min_spacing Å for proper solvation"
+            }
         }
     }
     
@@ -4208,9 +4312,12 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
         if {[info exists ::PETK::gui::cornerRadius] && $::PETK::gui::cornerRadius > 0} {
             append detailed_message "Corner radius: $::PETK::gui::cornerRadius Å\n"
         }
-    } else {
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
         append detailed_message "Inner diameter: $::PETK::gui::innerDiameter Å\n"
         append detailed_message "Outer diameter: $::PETK::gui::outerDiameter Å\n"
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        append detailed_message "Top diameter: $::PETK::gui::topDiameter Å\n"
+        append detailed_message "Bottom diameter: $::PETK::gui::bottomDiameter Å\n"
     }
     
     if {$is_valid} {
