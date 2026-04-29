@@ -1,0 +1,55 @@
+# Conda environment for PoreExplorer-PETK / nanopore-sem
+#
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate sem-env
+#   pip install -e .
+#
+# DOLFINx and its MPI/PETSc stack must come from conda-forge; pip wheels do
+# not exist for these packages.
+
+name: sem-env
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python>=3.10,<3.13
+
+  # FEM / parallel stack (must be conda-forge)
+  - fenics-dolfinx>=0.7
+  - mpich
+  - mpi4py>=3.1
+  - petsc4py>=3.18
+
+  # Numerical core
+  - numpy>=1.23
+  - scipy>=1.9
+  - numba>=0.56
+
+  # Molecular structure
+  - mdanalysis>=2.3
+  - biopython>=1.81
+  - griddataformats>=1.0.1
+
+  # Optional structure-prep stack
+  - pdbfixer>=1.8
+  - openmm>=8.0
+  - pdb2pqr>=3.0
+
+  # Visualization / notebooks
+  - matplotlib>=3.5
+  - jupyter
+  - ipywidgets
+
+  # Dev tooling
+  - pytest>=6
+  - pytest-cov>=2.10
+  - black>=22
+  - flake8>=4
+  - mypy>=0.910
+  - pre-commit>=2.15
+
+  # Pip-only extras (installed last)
+  - pip
+  - pip:
+      - pytest-mpi>=0.4

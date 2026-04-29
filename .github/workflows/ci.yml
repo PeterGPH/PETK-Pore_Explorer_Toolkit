@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-import:
+    name: lint + import smoke test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install (pip-only deps; skip DOLFINx stack)
+        run: |
+          python -m pip install --upgrade pip
+          # Install only the pip-installable core. DOLFINx requires conda-forge
+          # and is exercised in the conda job below.
+          pip install "numpy>=1.23" "scipy>=1.9" "numba>=0.56" \
+                      "MDAnalysis>=2.3" "biopython>=1.81" "gridDataFormats>=1.0.1"
+          pip install flake8 pytest
+
+      - name: Lint (flake8, syntax + undefined names only)
+        run: |
+          flake8 sem --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Import smoke test
+        run: |
+          python -c "import sem; print('sem imported OK, version:', getattr(sem, '__version__', 'unknown'))"
+
+      - name: Run pytest if tests/ exists
+        run: |
+          if [ -d tests ]; then pytest -q; else echo "no tests/ directory yet — skipping"; fi
+
+  conda-build:
+    name: conda env (DOLFINx) build check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Miniforge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: sem-env
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Install package
+        shell: bash -el {0}
+        run: pip install -e .
+
+      - name: Import smoke test (with DOLFINx)
+        shell: bash -el {0}
+        run: |
+          python -c "import dolfinx, mpi4py, petsc4py; print('FEM stack OK')"
+          python -c "import sem; print('sem package OK')"

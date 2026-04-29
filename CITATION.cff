@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use PoreExplorer-PETK in your research, please cite it as below."
+title: "PoreExplorer-PETK: a VMD GUI and DOLFINx-based SEM toolkit for nanopore analytics"
+abstract: >
+  PoreExplorer Toolkit (PETK) is a VMD-based graphical front-end paired with a
+  Python (nanopore-sem) package that solves the Steric Exclusion Model on
+  cylindrical, double-cone, and biological nanopore geometries using DOLFINx
+  with MPI parallelism.
+authors:
+  - name: "SEM Development Team"
+    email: "pinhao2@illinois.edu"
+version: "0.1.0"
+date-released: "2026-04-29"
+license: MIT
+repository-code: "https://github.com/PeterGPH/PETK-Pore_Explorer_Toolkit"
+keywords:
+  - nanopore
+  - steric-exclusion-model
+  - finite-element
+  - dolfinx
+  - mpi
+  - vmd
+  - electrochemistry
+  - molecular-dynamics

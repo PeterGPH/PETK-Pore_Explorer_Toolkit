@@ -1,0 +1,41 @@
+{
+  "metadata": {
+    "generated_by": "PETK GUI",
+    "timestamp": "2026-04-29 14:56:32",
+    "calculation_mode": "run",
+    "version": "1.0"
+  },
+  "input": {
+    "moving_pdb": "../centered_1AOI.pdb"
+  },
+  "pore_geometry": {
+    "pore_type": "cylindrical",
+    "pore_radius": 100.0,
+    "corner_radius": 50.0,
+    "membrane_thickness": 200.0
+  },
+  "simulation": {
+    "voltage": 500,
+    "bulk_conductivity": 16.6,
+    "grid_resolution": 6.0,
+    "use_vdw_radii": false,
+    "use_pdb2pqr": true,
+    "force_field": "CHARMM",
+    "default_radius": 1.5,
+    "membrane_conductivity": 0.0000001
+  },
+  "movement": {
+    "z_start": 110,
+    "z_end": -110,
+    "z_step": 10.0
+  },
+  "output": {
+    "output_prefix": "vertical_movement",
+    "preview_frames": 5
+  },
+  "box_dimensions": {
+    "x": [-150.0, 150.0],
+    "y": [-150.0, 150.0],
+    "z": [-150.0, 150.0]
+  }
+}

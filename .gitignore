@@ -1,0 +1,70 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+pip-wheel-metadata/
+.installed.cfg
+MANIFEST
+
+# --- Virtual environments ---
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# --- OS ---
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# --- Generated / simulation output ---
+results/
+petk/results/
+petk/sem_preview/
+*.tga
+*.dx
+*.h5
+*.xdmf
+*.bp
+*.vtu
+*.pvd
+*.log
+
+# Keep example/demo PDBs but ignore ad-hoc simulation outputs
+out/
+output/
+tmp/
