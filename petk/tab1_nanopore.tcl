@@ -1538,6 +1538,42 @@ proc ::PETK::gui::resamplePhoto {image target_width target_height} {
         return $image
     }
 
+    # FAST PRE-SHRINK ----------------------------------------------------
+    # The high-quality box-filter loop below is pure interpreted Tcl,
+    # ~O(target_pixels × source_pixels_per_target). For a 4739×2502
+    # source going to 300×250 that's tens of millions of ``image get``
+    # calls — multiple seconds.
+    #
+    # Tk's native ``image copy -subsample sx sy`` is a C-level point
+    # sampler that runs in microseconds. Use it to shrink the source to
+    # at most ~2× the target in each axis (separately, so aspect is
+    # preserved) before running the high-quality averager. Visually the
+    # final result is still box-filtered — the prefilter just reduces
+    # the number of source pixels the averager has to read.
+    #
+    # We keep prefilter_owned so we can ``image delete`` it after use
+    # and avoid leaking photo handles per redraw.
+    set prefilter_owned ""
+    set sub_x [expr {max(1, int(floor(double($src_w) / (2 * $target_width))))}]
+    set sub_y [expr {max(1, int(floor(double($src_h) / (2 * $target_height))))}]
+    if {$sub_x > 1 || $sub_y > 1} {
+        set prefilter [image create photo]
+        if {[catch {
+            $prefilter copy $image -subsample $sub_x $sub_y
+        } err]} {
+            # If -subsample fails for any reason, fall back to the
+            # original source — correctness over speed.
+            image delete $prefilter
+            set prefilter ""
+        }
+        if {$prefilter ne ""} {
+            set image $prefilter
+            set prefilter_owned $prefilter
+            set src_w [image width $image]
+            set src_h [image height $image]
+        }
+    }
+
     set scaled [image create photo -width $target_width -height $target_height]
     set max_channel [::PETK::gui::getPhotoColorDepth $image]
     set white_value $max_channel
@@ -1635,6 +1671,12 @@ proc ::PETK::gui::resamplePhoto {image target_width target_height} {
             lappend row_colors $color
         }
         $scaled put [list $row_colors] -to 0 $dy
+    }
+
+    # Free the temporary prefilter image (if we created one) before
+    # returning. The cache layer above us only retains $scaled.
+    if {$prefilter_owned ne ""} {
+        catch {image delete $prefilter_owned}
     }
 
     return $scaled
