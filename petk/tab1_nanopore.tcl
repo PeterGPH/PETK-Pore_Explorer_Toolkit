@@ -1284,7 +1284,8 @@ proc ::PETK::gui::loadPoreImages {} {
     ::PETK::gui::clearScaledImageCache
     set ::PETK::gui::poreImages(cylindrical) ""
     set ::PETK::gui::poreImages(doublecone) ""
-    
+    set ::PETK::gui::poreImages(conical) ""
+
     set cyl_path [::PETK::gui::resourcePath shapes shape2.gif]
     if {[file exists $cyl_path]} {
         if {[catch {
@@ -1295,7 +1296,7 @@ proc ::PETK::gui::loadPoreImages {} {
     } else {
         puts "Warning: Cylindrical pore image not found at: $cyl_path"
     }
-    
+
     set cone_path [::PETK::gui::resourcePath shapes shape1.gif]
     if {[file exists $cone_path]} {
         if {[catch {
@@ -1305,6 +1306,17 @@ proc ::PETK::gui::loadPoreImages {} {
         }
     } else {
         puts "Warning: Double cone pore image not found at: $cone_path"
+    }
+
+    set conical_path [::PETK::gui::resourcePath shapes shape3.gif]
+    if {[file exists $conical_path]} {
+        if {[catch {
+            set ::PETK::gui::poreImages(conical) [image create photo -file $conical_path]
+        } error]} {
+            puts "Warning: Could not load conical pore image: $error"
+        }
+    } else {
+        puts "Warning: Conical pore image not found at: $conical_path"
     }
 }
 
