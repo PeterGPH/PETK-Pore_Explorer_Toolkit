@@ -27,7 +27,7 @@ Use it to:
 │   ├── shapes/            # Pore-geometry templates
 │   └── Demo/              # Demo inputs and reference outputs
 ├── sem/                   # Python package: nanopore-sem
-│   ├── cli.py             # `sem` and `sem-mpi` entry points
+│   ├── cli.py             # `sem` entry point (works in serial and under mpirun)
 │   ├── pore_geometry.py   # Geometry builders and distance fields
 │   ├── vertical_movement_sem.py  # Translocation driver
 │   ├── conductivity_models.py
@@ -56,7 +56,16 @@ Use it to:
 # 1. Clone
 git clone https://github.com/PeterGPH/PETK-Pore_Explorer_Toolkit.git
 cd PETK-Pore_Explorer_Toolkit
- 
+
+# 2. Create the conda env (DOLFINx + MPI + numerical core)
+conda env create -f environment.yml
+conda activate sem-env
+
+# 3. Install the Python package in editable mode
+pip install -e .
+
+# 4. (Optional) verify the install
+sem --help
 ```
 
 ## Quick start (GUI)
@@ -87,14 +96,20 @@ resolution, z-range, and run). It writes a `config.json` and invokes the
 Run a SEM calculation directly from a config:
 
 ```bash
-sem run --config config.json
+sem run config.json
 ```
 
-Run in parallel:
+Run in parallel — `mpi4py` inside `sem.cli:main` picks up the MPI rank
+automatically, so the same `sem` entry point works under `mpirun`:
 
 ```bash
-mpirun -n 8 sem-mpi run --config config.json
+mpirun -n 8 sem run config.json
 ```
+
+Other available subcommands: `sem open_pore config.json` (open-pore current
+only), `sem preview_only config.json`, `sem rotation_scan config.json`, and
+`sem create_config <pore_type>` to write an example config file. Run
+`sem --help` for the full list.
 
 A minimal `config.json` is included at the repo root and reproduces a
 1AOI nucleosome translocating through a 100 Å cylindrical pore.

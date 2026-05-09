@@ -68,3 +68,9 @@ petk/sem_preview/
 out/
 output/
 tmp/
+overlap_check_results/
+benchmark_kowalczyk_2011/
+padding_sweep_*/
+
+# --- Editor / AI assistant scratch ---
+.claude/

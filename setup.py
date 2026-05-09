@@ -133,8 +133,11 @@ setup(
     
     entry_points={
         "console_scripts": [
+            # `sem` works for both serial and parallel runs — mpi4py inside
+            # sem.cli:main auto-detects the MPI rank, so users invoke
+            # `sem run config.json` directly or `mpirun -n N sem run config.json`
+            # for parallel. No separate `sem-mpi` entry is needed.
             "sem=sem.cli:main",
-            "sem-mpi=sem.cli:main_mpi",
             "pdb2xyz=sem.scripts.pdb2xyz:main",
             "gen_dist=sem.scripts.gen_dist:main"
         ],
