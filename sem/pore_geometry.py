@@ -414,9 +414,12 @@ class BiologicalPore(BasePore):
                 SEARCH_LENGTH = 2  # Same as gen_dist.py
                 max_search_radius = cutoff  # User's modification
                 
-                # Apply translation to match gen_dist.py workflow
-                # gen_dist.py translates atoms by subtracting lower bounds
-                center_coords = np.array([center_x, center_y, center_z])
+                # Apply translation to match gen_dist.py workflow.
+                # gen_dist.py translates atoms by subtracting the lower-bound
+                # corner so they live in [0, Lm] x [0, Wm] x [0, Hm], which is
+                # the coordinate space the spatial-hash indexing below assumes.
+                # (Variable name predates this comment; kept for minimal diff.)
+                center_coords = np.array([x_min, y_min, z_min])
                 translated_pore_positions = pore_positions - center_coords
                 
                 # Set up spatial hashing like gen_dist.py
