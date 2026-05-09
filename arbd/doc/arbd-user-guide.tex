@@ -1,0 +1,327 @@
+\documentclass[10pt]{article}
+% \documentclass[10pt,twocolumn]{article}
+\usepackage{achemso,caption,graphicx}
+\usepackage[margin=2.5cm]{geometry}
+% \setlength{\columnsep}{0.8cm}
+
+\captionsetup{font=small}
+
+\usepackage[version=3]{mhchem} % Formula subscripts using \ce{}
+\usepackage{color}             % for comments in color
+\usepackage{nameref}
+
+%% \usepackage{sectsty}
+%% \sectionfont{\large}
+\usepackage[compact,small]{titlesec}
+% \titlespacing*{\section}{0pt}{10pt}{5pt}
+% \titleformat{\section}{small}
+
+\usepackage{listings}
+
+% MACROS
+% \input{macros}
+\newcommand{\ARBDFull}{Atomic Resolution Browian Dynamics}
+\newcommand{\ARBD}{ARBD}
+% \newcommand{\code}[1]{\colorbox{blue}{\lstinline[basicstyle=\ttfamily\color{white}]#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+
+% TITLE
+% \title{\hrule\vspace{0.1cm}\Large \ARBDFull\ User's Guide \vspace{0.0cm}\hrule}
+\title{\Large \ARBDFull\ User's Guide}
+\author{\normalsize The Center for Macromolecular Modeling and Bioninformatics}
+% \date{}
+
+\begin{document}
+\maketitle
+% \clearpage
+
+% ABSTRACT
+%% \begin{abstract}
+%% \end{abstract}
+
+\section{Introduction}
+
+\ARBDFull\ (ARBD) is a gpu-accelerated coarse-grained biomolecular simulation package.
+ARBD currently supports models composed of two basic units: point-like particles, and rigid body particles.
+Point particles can be connected through bonded potentials to construct polymers.
+
+% TODO: NVT ensemble, integrators
+
+ARBD is invoked from the command line and requires a configuration file for specification of the system.
+Currently ARBD's configuration file parser does not include a scripting interface or mathematical operations, so advanced users may want to script the generation of configuration files.
+An extensible python-based system for generating ARBD configuration files (including coordinate files) is provided in the examples directory.
+
+%% ARBD is offered as a Beta release and, so far, has 
+%%  only been tested on Unix platforms. 
+%% Nevertheless compilation should...
+
+ARBD uses the following units: kcal/mol for energy, ns for time, \AA\ for distance, and K for temperature.
+
+% \section{Compilation}
+
+\section{Configuration file}
+The configuration file is read by ARBD line-by-line. 
+The first space-delimited word of each line is expected to be a case-sensitive keyword, followed by arguments.
+These keywords configure the simulation engine and describe the simulation model.
+
+Most keywords are global and can be placed anywhere in the file and will produce the same effect.
+When a global keyword is repeated, the last use of the keyword overrides earlier usages.
+The keywords \textit{particle} and \textit{rigidBody} can be used multiple times, each declaring a new type of particle.
+Certain subsequent keywords such as \textit{mass} or \textit{num} describe the previously declared particle.
+Multiple uses of these between \textit{particle} and \textit{rigidBody} keywords.
+
+%% Args: keyword, accepted values, default value, description
+\newcommand{\keyword}[4]{\noindent\textbf{#1}\\\textit{Expected Value:} #2.  \textit{Default Value:} #3\\#4\\}
+
+\subsection{General simulation parameters}
+
+\keyword{outputName}{String}{``out''}
+{The file prefix for all output}
+
+\subsection{Simulation engine}
+
+
+\keyword{steps}{Integer}{100}
+{The number of steps the simulation will run.}
+
+\keyword{timestep}{Decimal}{10e-5}
+{The timestep for the integrator in nanoseconds.}
+
+\keyword{rigidBodyGridGridPeriod}{Integer}{1}
+{The number of steps between re-evalulation of the force between rigid body objects.}
+
+\keyword{seed}{Integer}{Number determined from the system clock}
+{The seed for the random number generator.}
+
+\keyword{origin}{Three decimals}{Determined from first point-particle grid}
+{The position of the corner of the simulation system.}
+
+\keyword{systemSize}{Three decimals}{Determined from first point-particle grid}
+{The size of the (orthonormal) simulation system. Please note that at this time, periodic boundaries are only used by point particles and not rigid body particles. For simulations employing rigid body particles, a confining ``gridFile'' is recommended. }
+
+\keyword{basis1}{Three decimals}{Determined from first point-particle grid}
+{The first basis vector for a possibly non-orthonormal simulation system. Overrides the systemSize parameter.}
+
+\keyword{basis2}{Three decimals}{Determined from first point-particle grid}
+{The second basis vector for a possibly non-orthonormal simulation system. Overrides the systemSize parameter.}
+
+\keyword{basis3}{Three decimals}{Determined from first point-particle grid}
+{The third basis vector for a possibly non-orthonormal simulation system. Overrides the systemSize parameter.}
+
+\keyword{temperature}{Decimal}{295 K}
+{The temperature of the system.}
+
+\keyword{temperatureGrid}{Path to Dx file}{None}
+{The location-dependent temperature of in the system.}
+
+\keyword{scaleIMDForce}{Decimal}{1}
+{Scaling factor for forces communicated to ARBD using the IMD protocol.}
+
+\keyword{outputPeriod}{Integer}{200}
+{Steps between writing trajectory output.}
+
+\keyword{outputFormat}{``dcd'', ``pdb'' or ``traj''}{``dcd''}
+{The format for the trajectory output file.}
+
+\subsection{Non-bonded interactions}
+\keyword{cutoff}{Decimal}{10 \AA}
+{The cutoff for non-bonded interactions.}
+
+\keyword{switchLen}{Decimal}{2 \AA}
+{The non-bonded potential is smoothly truncated (by linear scaling) between cutoff$-$switchLen and cutoff.}
+
+\keyword{decompPeriod}{Integer}{10}
+{Number of steps between domain decomposition of point particles and creation of pairlists. The current implementation of pairlist creation is quite slow, so users are advised to tune this parameter to optimize performance. WARNING: ARBD does not check whether particles have moved too far between decomposition steps, thus invalidating the pairlist.}
+
+\keyword{pairlistDistance}{Decimal}{2 \AA}
+{The pairlist contains all pairs of point particles within this distance plus the cutoff. Interactions are only calculated for pairs of particles in the pairlist.}
+
+%% \keyword{tabulatedPotential}{0 or 1}{0 \AA}
+%% {}
+
+\keyword{tabulatedFile}{String}{None}
+{A string following the format \textit{path/to/file}@\textit{indexA}@\textit{indexB} that indicates that the particle types corresponding to \textit{indexA} and \textit{indexB} interact through the tabulated potential desribed in \textit{path/to/file}. 
+The tabulated potential file should contain two columns giving the $r$ coordinates (in \AA) and the potential (in kcal/mol).
+The $r$ coordinates are assumed to start at 0 and be uniformly spaced. 
+The indeces \textit{indexA} and \textit{indexB} are 0-based integers.}
+
+\keyword{inputBonds}{Filename}{None}
+{File specifying the bonds in the system.
+Each line of the file should follow the format: \\\noindent
+\code{BOND [ADD|REPLACE] \textit{indexA} \textit{indexB} \textit{bondFile}} \\\noindent
+The contents of \textit{bondFile} should be columns giving the $r$ coordinates (in \AA) and the potential (in kcal/mol).
+The $r$ coordinates are assumed to start at 0 and be uniformly spaced. 
+}
+
+
+%% \keyword{tabulatedBondFile}{Filename}{None}
+%% {Declares a file used in tabulated bond The tabulated bond file should contain two columns giving the $r$ coordinates (in \AA) and the potential (in kcal/mol).
+%% The $r$ coordinates are assumed to start at 0 and be uniformly spaced. 
+%% The indeces \textit{indexA} and \textit{indexB} are 0-based integers.}
+
+\keyword{inputAngles}{Filename}{None}
+{File specifying the angles in the system.
+Each line of the file should follow the format: \\\noindent
+\code{ANGLE \textit{indexA} \textit{indexB} \textit{indexC} \textit{angleFile}} \\ \noindent
+The tabulated angle file should contain two columns giving the angle coordinates (in degrees from 0 to 180) and the potential (in kcal/mol).
+The angle coordinates are assumed to be uniformly spaced. 
+}
+
+\keyword{inputDihedrals}{Filename}{None}
+{File specifying the dihedral angles in the system.
+Each line of the file should follow the format: \\\noindent
+\code{DIHEDRAL \textit{indexA} \textit{indexB} \textit{indexC} \textit{indexD} \textit{dihedralFile}} \\ \noindent
+The contents of \textit{dihedralFile} should be two columns that give the angle coordinates (in degrees from -180 to 180) and the potential (in kcal/mol).
+The dihedral angle coordinates are assumed to be uniformly spaced.
+}
+
+\keyword{inputExcludes}{Filename}{None}
+{File specifying the non-bonded exclusions in the system.
+Each line of the file should follow the format: \\ \noindent
+\code{EXCLUDE \textit{indexA} \textit{indexB}}  \\ \noindent
+}
+
+
+\subsection{Point particles}
+
+\keyword{particle}{Unique string}{None}
+{Declares and provides a name for a new point particle type. This keyword should precede the keywords described in this subsection.}
+
+\keyword{num}{Integer}{0}
+{The number of particles of the preceding type in the system. This parameter will be overridden by the contents of the {\textbf inputParticles} file, if provided.}
+
+\keyword{diffusion}{Decimal}{0}
+{The diffusion coefficient for the particle in \AA$^2$/ns. Used to derive a Langevin coefficient when a Langevin integrator is utilized.}
+
+\keyword{diffusionGridFile}{Name of Dx file}{None}
+{The location-dependent diffusion coefficient for the particle in \AA$^2$/ns. The grid should span the entire system.}
+
+\keyword{gridFile}{Name of Dx file}{None}
+{The location-dependent environment potential affecting the preceding particle type in kcal/mol. The potential is nominally zero outside the boundary of the grid potential.}
+
+\keyword{gridFileScale}{Decimal}{1.0}
+{A scaling factor to apply to the ``gridFile'' potential.}
+
+\keyword{rigidBodyPotential}{Keyword}{None}
+{The location-dependent environment potential affecting the preceding particle type in kcal/mol. The potential is nominally zero outside the boundary of the grid potential.
+This option may be specified multiple times. See ``potentialGrid'' below  in the ``Rigid body particles'' section for additional details.
+}
+
+%% TODO: interpolation scheme
+
+
+\subsection{Rigid body particles}
+
+\keyword{rigidBody}{Unique string}{None}
+{Declares and provides a name for a new rigid body particle type. This keyword should precede the keywords described in this subsection.}
+
+\keyword{num}{Integer}{0}
+{The number of particles of the preceding type in the system. This parameter adds to the particles contained in the {\textbf inputParticles} file, if provided.}
+
+\keyword{diffusion}{Decimal}{0}
+{The diffusion coefficient for the particle in \AA$^2$/ns. Used to derive a Langevin coefficient when a Langevin integrator is utilized.}
+
+%% \keyword{diffusionGridFile}{Name of Dx file}{None}
+%% {The location-dependent diffusion coefficient for the particle in \AA$^2$/ns. The grid should span the entire system.}
+
+\keyword{gridFile}{Key and name of Dx file}{None}
+{A 3-dimensional potential acting on the rigid body, specified in kcal/mol.
+The potential is associated with a user-specified key.
+Each voxel of a ``densityGrid'' in the rigid body using the same key will produce a force and torque due to the potential.
+The potential described by gridFile is fixed in space and can be considered an environement potential. 
+This option may be specified multiple times with different keys.
+}
+
+\keyword{potentialGrid}{Key and name of Dx file}{None}
+{A 3-dimensional potential associated with the rigid body particle in kcal/mol.
+Any point particle that declares the same key through the ``rigidBodyPotential'' keyword will experience forces due to the potential.
+Similarly each voxel of a ``densityGrid'' in another rigid body using the same key will experience a force due to the potential.
+All forces applied by the potential are inverted and applied to the rigid body along with a corresponding torque.
+This option may be specified multiple times with different keys.
+}
+
+\keyword{densityGrid}{Key and name of Dx file}{None}
+{A 3-dimensional density associated with the rigid body particle. 
+Voxels of this density will experience forces and torques from ``gridFile'' potentials with the same key ascribed to the same rigid body and from ``potentialGrid'' potentials with the same key in different rigid body particles.
+This option may be specified multiple times with different keys.
+Please note that in the beta release of ARBD, the densityGrid is not scaled by the volume of each voxel. This behavior may change in the future.
+}
+
+\keyword{pmfScale}{Key and decimal}{1.0}
+{A scaling factor to apply to the ``gridFile'' potential of the same key.}
+
+\keyword{potentialGridScale}{Key and decimal}{1.0}
+{A scaling factor to apply to the ``potentialGrid'' of the same key.}
+
+\keyword{densityGridScale}{Key and decimal}{1.0}
+{A scaling factor to apply to the ``densityGrid'' of the same key.}
+
+
+
+\subsection{Coordinates}
+
+%% There are three ways to specity the initial coordinates for point particles.
+%% Each of the keywords below overrides the keywords above.
+%% If none of the keywords is provided, ARBD places particles randomly in the lowest regions of the gridFile potential for the particle type. 
+
+\keyword{inputCoordinates}{Filename}{None}
+{Name of a file specifying point particle positions. 
+Each line of the file should hold three floating point values for $x$, $y$ and $z$.
+Coordinates are assigned in the order of particle index.
+By default, all particles of the first type defined in the ARBD configuration file have the first block of indices, particles of the second type defined in the file have the second block, etc.
+}
+
+%% \keyword{inputParticle}{Filename}{None}
+%% %% TODO
+%% {Name of a file specifying point particle positions. 
+%% Each line of the file should conform to the following: \\ \noindent
+%% \code{ATOM \textit{index} \textit{name} \textit{x-coord Y-coord Z-coord}} \\ \noindent
+%% where \textit{index} 
+%% }
+
+\keyword{restartCoordinates}{Filename}{None}
+{Loads a point particle restart file written by ARBD.
+The file describes the particles in order, each line of the file describes a point particle in order as follows: \\ \noindent
+\code{\textit{particle\_type} \textit{x} \textit{y} \textit{z}} \\ \noindent
+This keyword overrides the \code{inputCoordinates} and \code{num} keywords.
+}
+
+\keyword{copyReplicaCoorinates}{Integer}{1}
+{If greater than zero, copy coordinates from the first replica to all other replicas. 
+Coordinates for replicas otherwise can be provided in a \code{inputCoordinates} 
+% or \code{restartCoordinates}
+ file containing lines for all replicas.
+%% One can concatenate the per-replica restart files generated by ARBD to generate a \code{restartCoordinates} file.
+}
+
+\keyword{inputRBCoordinates}{Filename}{None}
+{Reads rigid body coordinates from \textit{Filename}.
+Each line of the file specifies a rigid body particle's center (x y z) followed by the 3-by-3 orientation matrix (xx xy xz yx yy yz zx zy zz).
+The coordinates are assigned to the rigid body particles in order.
+% By default, rigid body particles are placed randomly in the simulation system.
+}
+
+%% \subsection{Deprecated}
+
+%% numberFluct
+%% numberFluctPeriod
+%% interparticleForce
+%% fullLongRange
+%% coulombConst
+%% electricField
+%% numCap
+
+%% outputEnergyPeriod
+%% currentSegmentZ
+%% forceXGridFile
+%% forceYGridFile
+%% forceZGridFile
+
+%% charge
+%% radius
+%% eps
+%% reservoirFile
+
+%% tabulatedPotential
+\end{document}

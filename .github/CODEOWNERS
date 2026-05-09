@@ -1,0 +1,6 @@
+# CODEOWNERS — auto-requests review on every PR.
+# Syntax: <pattern>  <@user(s)>
+# https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner — every PR gets routed to Peter for review.
+*       @PeterGPH

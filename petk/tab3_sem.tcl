@@ -81,24 +81,130 @@ proc ::PETK::gui::buildTab3 {tab3} {
 
     grid $container.grid.preplbl $container.grid.prepval $container.grid.defaultlbl $container.grid.default -sticky ew -pady 3
 
+    # === MESH MODE: uniform (single grid resolution) vs multigrid (gmsh fine + coarse) ===
+    # A separator frame inside Grid Settings, vertically below the rows above.
+    ttk::separator $container.grid.sep -orient horizontal
+    grid $container.grid.sep -columnspan 6 -sticky ew -pady "8 4"
+
+    ttk::label $container.grid.meshmodelbl -text "Mesh mode:" -width 18
+    ttk::radiobutton $container.grid.meshmode_uniform -text "Uniform" \
+        -variable ::PETK::gui::meshMode -value "uniform" \
+        -command {::PETK::gui::onMeshModeChanged}
+    ttk::radiobutton $container.grid.meshmode_graded -text "Multigrid (gmsh)" \
+        -variable ::PETK::gui::meshMode -value "multigrid" \
+        -command {::PETK::gui::onMeshModeChanged}
+    ttk::label $container.grid.meshmodehelp \
+        -text "Multigrid uses a fine cell size in a box around the pore and coarser cells in the bulk." \
+        -foreground gray35
+    grid $container.grid.meshmodelbl $container.grid.meshmode_uniform \
+        $container.grid.meshmode_graded -sticky w -pady 3
+    grid $container.grid.meshmodehelp -columnspan 6 -sticky w -pady {0 3}
+
+    # Fine and coarse cell sizes (multigrid mode only).
+    ttk::label $container.grid.finelbl -text "Fine cell size (Å):" -width 18
+    ttk::entry $container.grid.fine -textvariable ::PETK::gui::gmshFineSize \
+        -width 12 -justify center
+    ttk::label $container.grid.coarselbl -text "Coarse cell size (Å):" -width 18
+    ttk::entry $container.grid.coarse -textvariable ::PETK::gui::gmshCoarseSize \
+        -width 12 -justify center
+    grid $container.grid.finelbl $container.grid.fine \
+        $container.grid.coarselbl $container.grid.coarse -sticky ew -pady 3
+
+    # Fine-box sizing: explicit X/Y/Z or auto-fit-to-pore with margin.
+    ttk::label $container.grid.fineboxmodelbl -text "Fine box:" -width 18
+    ttk::radiobutton $container.grid.fineboxmode_manual -text "Explicit X/Y/Z" \
+        -variable ::PETK::gui::gmshFineBoxMode -value "manual" \
+        -command {::PETK::gui::onMeshModeChanged}
+    ttk::radiobutton $container.grid.fineboxmode_auto \
+        -text "Auto-fit to pore (margin Å)" \
+        -variable ::PETK::gui::gmshFineBoxMode -value "auto" \
+        -command {::PETK::gui::onMeshModeChanged}
+    grid $container.grid.fineboxmodelbl $container.grid.fineboxmode_manual \
+        $container.grid.fineboxmode_auto -sticky w -pady 3
+
+    # Explicit X/Y/Z entries (manual fine-box mode).
+    ttk::label $container.grid.fbxlbl -text "Fine box X (Å):" -width 18
+    ttk::entry $container.grid.fbx -textvariable ::PETK::gui::gmshFineBoxX \
+        -width 10 -justify center
+    ttk::label $container.grid.fbylbl -text "Y (Å):" -width 6
+    ttk::entry $container.grid.fby -textvariable ::PETK::gui::gmshFineBoxY \
+        -width 10 -justify center
+    ttk::label $container.grid.fbzlbl -text "Z (Å):" -width 6
+    ttk::entry $container.grid.fbz -textvariable ::PETK::gui::gmshFineBoxZ \
+        -width 10 -justify center
+    grid $container.grid.fbxlbl $container.grid.fbx \
+        $container.grid.fbylbl $container.grid.fby \
+        $container.grid.fbzlbl $container.grid.fbz -sticky ew -pady 3
+
+    # Auto-margin entry (auto fine-box mode).
+    ttk::label $container.grid.autolbl -text "Auto margin (Å):" -width 18
+    ttk::entry $container.grid.auto -textvariable ::PETK::gui::gmshAutoMargin \
+        -width 12 -justify center
+    ttk::label $container.grid.autohelp \
+        -text "Fine box = (pore widest + 2·margin) × (pore widest + 2·margin) × (membrane + 2·margin)." \
+        -foreground gray35 -wraplength 480
+    grid $container.grid.autolbl $container.grid.auto -sticky ew -pady 3
+    grid $container.grid.autohelp -columnspan 6 -sticky w -pady {0 3}
+
+    # Stash references so the mode-change handler can toggle states.
+    set ::PETK::gui::tab3MeshGradedWidgets [list \
+        $container.grid.fine \
+        $container.grid.coarse \
+        $container.grid.fineboxmode_manual \
+        $container.grid.fineboxmode_auto \
+    ]
+    set ::PETK::gui::tab3MeshFineBoxManualWidgets [list \
+        $container.grid.fbx $container.grid.fby $container.grid.fbz \
+    ]
+    set ::PETK::gui::tab3MeshFineBoxAutoWidgets [list \
+        $container.grid.auto \
+    ]
+
     # === CALCULATION MODE SECTION ===
+    # Each mode is a radio button on its own row, followed by a one-line
+    # description indented underneath. Keeps the three options visually
+    # distinct and gives the long "Hybrid" label room to breathe.
     ttk::labelframe $container.calcmode -text "Calculation Mode" -padding 10
     grid $container.calcmode -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
-    grid columnconfigure $container.calcmode {1} -weight 1
+    grid columnconfigure $container.calcmode 0 -weight 1
     incr row
+
+    # Description-style label: one shared style so the three captions render
+    # consistently even if Tk picks different defaults on macOS / Linux / Windows.
+    ttk::style configure PETK.CalcModeDesc.TLabel \
+        -font {TkDefaultFont 9} -foreground gray35
 
     ttk::radiobutton $container.calcmode.run -text "Vertical Passage" \
         -variable ::PETK::gui::semCalculationMode -value "run" \
         -command {::PETK::gui::onSemCalculationModeChanged}
+    ttk::label $container.calcmode.run_desc \
+        -style PETK.CalcModeDesc.TLabel \
+        -text "Translocate the analyte along Z at a fixed orientation." \
+        -wraplength 520 -justify left
+
     ttk::radiobutton $container.calcmode.rotation -text "Rotation Scan" \
         -variable ::PETK::gui::semCalculationMode -value "rotation_scan" \
         -command {::PETK::gui::onSemCalculationModeChanged}
-    ttk::label $container.calcmode.info -text "Select calculation type. Rotation scan samples random orientations; run uses analyte movement." \
-        -wraplength 500 -justify left
+    ttk::label $container.calcmode.rotation_desc \
+        -style PETK.CalcModeDesc.TLabel \
+        -text "Sample random orientations at a fixed Z position (no Z sweep)." \
+        -wraplength 520 -justify left
 
-    grid $container.calcmode.run -row 0 -column 0 -sticky w -pady 2
-    grid $container.calcmode.rotation -row 0 -column 1 -sticky w -pady 2 -padx 20
-    grid $container.calcmode.info -row 1 -column 0 -columnspan 2 -sticky w -pady {5 0}
+    ttk::radiobutton $container.calcmode.hybrid -text "Hybrid (Translocation + Rotation)" \
+        -variable ::PETK::gui::semCalculationMode -value "hybrid" \
+        -command {::PETK::gui::onSemCalculationModeChanged}
+    ttk::label $container.calcmode.hybrid_desc \
+        -style PETK.CalcModeDesc.TLabel \
+        -text "Run the full Z sweep at each sampled orientation." \
+        -wraplength 520 -justify left
+
+    # Stack vertically: radio, indented description, radio, indented description, …
+    grid $container.calcmode.run          -row 0 -column 0 -sticky w -pady "2 0"
+    grid $container.calcmode.run_desc     -row 1 -column 0 -sticky w -padx {22 0} -pady "0 6"
+    grid $container.calcmode.rotation     -row 2 -column 0 -sticky w -pady "2 0"
+    grid $container.calcmode.rotation_desc -row 3 -column 0 -sticky w -padx {22 0} -pady "0 6"
+    grid $container.calcmode.hybrid       -row 4 -column 0 -sticky w -pady "2 0"
+    grid $container.calcmode.hybrid_desc  -row 5 -column 0 -sticky w -padx {22 0} -pady "0 2"
 
     # === MOVEMENT PARAMETERS (RUN MODE) ===
     ttk::labelframe $container.movement -text "Analyte Movement Parameters" -padding 10
@@ -120,6 +226,8 @@ proc ::PETK::gui::buildTab3 {tab3} {
 
     ttk::label $container.rotation.sampleslbl -text "Number of samples:" -width 20
     ttk::entry $container.rotation.samples -textvariable ::PETK::gui::rotationSamples -width 12 -justify center
+    ttk::label $container.rotation.seedlbl -text "Random seed:" -width 20
+    ttk::entry $container.rotation.seed -textvariable ::PETK::gui::rotationSeed -width 12 -justify center
     ttk::frame $container.rotation.options
     ttk::checkbutton $container.rotation.options.bulkchk -text "In Bulk Electrolyte" \
         -variable ::PETK::gui::useBulkElectrolyte -command ::PETK::gui::applyBulkElectrolyteSetting
@@ -128,6 +236,7 @@ proc ::PETK::gui::buildTab3 {tab3} {
     pack $container.rotation.options.bulkchk $container.rotation.options.reusemesh -side left -padx 5
 
     grid $container.rotation.sampleslbl $container.rotation.samples -sticky ew -pady 3
+    grid $container.rotation.seedlbl $container.rotation.seed -sticky ew -pady 3
     grid $container.rotation.options -column 0 -columnspan 2 -sticky w -pady "0 3"
     set ::PETK::gui::bulkElectrolyteButton $container.rotation.options.bulkchk
     if {[info procs ::PETK::gui::updateBulkElectrolyteButtonState] ne ""} {
@@ -137,6 +246,8 @@ proc ::PETK::gui::buildTab3 {tab3} {
     set ::PETK::gui::tab3MovementFrame $container.movement
     set ::PETK::gui::tab3RotationFrame $container.rotation
     set ::PETK::gui::tab3MovementRow $row
+    incr row
+    set ::PETK::gui::tab3RotationRow $row
     incr row
 
     # === PYTHON ENVIRONMENT SECTION ===
@@ -219,6 +330,73 @@ proc ::PETK::gui::buildTab3 {tab3} {
     ttk::button $container.summary.update -text "Update Summary" -command {::PETK::gui::updateSEMParameterSummary}
     grid $container.summary.update -sticky ew -pady "5 0"
 
+    # === POTENTIAL MAP EXPORT (ARBD-compatible .dx grids) ===
+    ttk::labelframe $container.arbd -text "Potential Map Export" -padding 10
+    grid $container.arbd -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
+    grid columnconfigure $container.arbd {1 3} -weight 1
+    incr row
+
+    ttk::checkbutton $container.arbd.enable \
+        -text "Export ARBD-compatible potential grids (.dx)" \
+        -variable ::PETK::gui::arbdExportEnabled \
+        -command {::PETK::gui::onArbdExportToggle}
+    grid $container.arbd.enable -columnspan 4 -sticky w -pady "0 4"
+
+    ttk::label $container.arbd.help \
+        -text "Writes both the no-analyte (open-pore) map and per-z with-analyte maps. NAME:CHARGE pairs separated by commas." \
+        -foreground gray35 -wraplength 540 -justify left
+    grid $container.arbd.help -columnspan 4 -sticky w -pady "0 6"
+
+    # Basic settings: ions / resolution / stride
+    ttk::label $container.arbd.ionslbl -text "Ion species:" -width 18
+    ttk::entry $container.arbd.ions -textvariable ::PETK::gui::arbdIons \
+        -width 24
+    ttk::label $container.arbd.reslbl -text "Resolution (Å):" -width 16
+    ttk::entry $container.arbd.res -textvariable ::PETK::gui::arbdResolutionA \
+        -width 10 -justify center
+    grid $container.arbd.ionslbl $container.arbd.ions \
+        $container.arbd.reslbl $container.arbd.res -sticky ew -pady 3
+
+    ttk::label $container.arbd.stridelbl -text "Z-step stride:" -width 18
+    ttk::entry $container.arbd.stride -textvariable ::PETK::gui::arbdStride \
+        -width 10 -justify center
+    grid $container.arbd.stridelbl $container.arbd.stride -sticky ew -pady 3
+
+    ttk::label $container.arbd.stridehelp \
+        -text "0 = final z only.   N>0 = every Nth step.   (No effect for Rotation Scan.)" \
+        -foreground gray35
+    grid $container.arbd.stridehelp -columnspan 4 -sticky w -padx {22 0} -pady "0 3"
+
+    # Advanced disclosure: wall height + temperature
+    ttk::checkbutton $container.arbd.advtoggle \
+        -text "Advanced (wall height, temperature)" \
+        -variable ::PETK::gui::arbdShowAdvanced \
+        -command {::PETK::gui::onArbdAdvancedToggle}
+    grid $container.arbd.advtoggle -columnspan 4 -sticky w -pady "8 4"
+
+    ttk::label $container.arbd.walllbl -text "Wall height (kcal/mol):" -width 22
+    ttk::entry $container.arbd.wall -textvariable ::PETK::gui::arbdWallHeight \
+        -width 10 -justify center
+    ttk::label $container.arbd.templbl -text "Temperature (K):" -width 18
+    ttk::entry $container.arbd.temp -textvariable ::PETK::gui::arbdTemperatureK \
+        -width 10 -justify center
+
+    # Stash widget refs for state-toggle and visibility helpers.
+    set ::PETK::gui::tab3ArbdBasicWidgets [list \
+        $container.arbd.ions $container.arbd.res $container.arbd.stride \
+        $container.arbd.advtoggle $container.arbd.wall $container.arbd.temp \
+    ]
+    set ::PETK::gui::tab3ArbdStrideWidget    $container.arbd.stride
+    set ::PETK::gui::tab3ArbdAdvancedWidgets [list \
+        $container.arbd.walllbl $container.arbd.wall \
+        $container.arbd.templbl $container.arbd.temp \
+    ]
+    set ::PETK::gui::tab3ArbdAdvancedFrame   $container.arbd
+    set ::PETK::gui::tab3ArbdAdvancedRow0    [list \
+        $container.arbd.walllbl $container.arbd.wall \
+        $container.arbd.templbl $container.arbd.temp \
+    ]
+
     # === ACTION BUTTONS SECTION ===
     ttk::labelframe $container.actions -text "Actions" -padding 10
     grid $container.actions -row $row -column 0 -sticky ew -padx 10 -pady "5 10"
@@ -300,6 +478,8 @@ proc ::PETK::gui::buildTab3 {tab3} {
     # Initialize SEM variables
     ::PETK::gui::initializeSEMVariables
     ::PETK::gui::onSemCalculationModeChanged
+    ::PETK::gui::onMeshModeChanged
+    ::PETK::gui::onArbdExportToggle
 
     # Force proper sizing after everything is created
     after idle [list ::PETK::gui::updateTab3ScrollRegion]
@@ -353,6 +533,34 @@ proc ::PETK::gui::initializeSEMVariables {} {
     if {![info exists ::PETK::gui::rotationSamples]} {
         set ::PETK::gui::rotationSamples "10"
     }
+    if {![info exists ::PETK::gui::rotationSeed]} {
+        set ::PETK::gui::rotationSeed "42"
+    }
+    # Always exists so the parameter summary, validation, and run-command
+    # builder can read it without an "info exists" guard. Tab 2 syncs this when
+    # an analyte is loaded; before that it stays empty.
+    if {![info exists ::PETK::gui::semAnalytePDB]} {
+        set ::PETK::gui::semAnalytePDB ""
+    }
+
+    # Mesh mode (uniform / graded) and graded-mesh parameters.
+    if {![info exists ::PETK::gui::meshMode]}        { set ::PETK::gui::meshMode "uniform" }
+    if {![info exists ::PETK::gui::gmshFineSize]}    { set ::PETK::gui::gmshFineSize "1.0" }
+    if {![info exists ::PETK::gui::gmshCoarseSize]}  { set ::PETK::gui::gmshCoarseSize "5.0" }
+    if {![info exists ::PETK::gui::gmshFineBoxMode]} { set ::PETK::gui::gmshFineBoxMode "auto" }
+    if {![info exists ::PETK::gui::gmshFineBoxX]}    { set ::PETK::gui::gmshFineBoxX "100.0" }
+    if {![info exists ::PETK::gui::gmshFineBoxY]}    { set ::PETK::gui::gmshFineBoxY "100.0" }
+    if {![info exists ::PETK::gui::gmshFineBoxZ]}    { set ::PETK::gui::gmshFineBoxZ "100.0" }
+    if {![info exists ::PETK::gui::gmshAutoMargin]}  { set ::PETK::gui::gmshAutoMargin "50.0" }
+
+    # ARBD potential-grid export defaults.
+    if {![info exists ::PETK::gui::arbdExportEnabled]} { set ::PETK::gui::arbdExportEnabled 0 }
+    if {![info exists ::PETK::gui::arbdIons]}          { set ::PETK::gui::arbdIons "POT:+1,CLA:-1" }
+    if {![info exists ::PETK::gui::arbdResolutionA]}   { set ::PETK::gui::arbdResolutionA "" }
+    if {![info exists ::PETK::gui::arbdStride]}        { set ::PETK::gui::arbdStride "0" }
+    if {![info exists ::PETK::gui::arbdShowAdvanced]}  { set ::PETK::gui::arbdShowAdvanced 0 }
+    if {![info exists ::PETK::gui::arbdWallHeight]}    { set ::PETK::gui::arbdWallHeight "100.0" }
+    if {![info exists ::PETK::gui::arbdTemperatureK]}  { set ::PETK::gui::arbdTemperatureK "295.0" }
     if {![info exists ::PETK::gui::useBulkElectrolyte]} {
         set ::PETK::gui::useBulkElectrolyte 0
     }
@@ -488,6 +696,110 @@ proc ::PETK::gui::updateBulkElectrolyteButtonState {} {
 proc ::PETK::gui::onSemCalculationModeChanged {} {
     puts "SEM calculation mode switched to $::PETK::gui::semCalculationMode"
     ::PETK::gui::updateSemCalculationModeUI
+    # Re-evaluate ARBD stride state — rotation_scan disables it.
+    if {[info procs ::PETK::gui::onArbdExportToggle] ne ""} {
+        ::PETK::gui::onArbdExportToggle
+    }
+    if {[info procs ::PETK::gui::updateSEMParameterSummary] ne ""} {
+        ::PETK::gui::updateSEMParameterSummary
+    }
+}
+
+proc ::PETK::gui::onArbdExportToggle {} {
+    set enabled 0
+    if {[info exists ::PETK::gui::arbdExportEnabled]} {
+        set enabled $::PETK::gui::arbdExportEnabled
+    }
+    set state [expr {$enabled ? "normal" : "disabled"}]
+    if {[info exists ::PETK::gui::tab3ArbdBasicWidgets]} {
+        foreach w $::PETK::gui::tab3ArbdBasicWidgets {
+            if {[winfo exists $w]} { $w configure -state $state }
+        }
+    }
+    # Stride field has an additional rule: it's also greyed when
+    # calc mode = rotation_scan, since there's only one z value.
+    if {$enabled && [info exists ::PETK::gui::semCalculationMode] && \
+            $::PETK::gui::semCalculationMode eq "rotation_scan"} {
+        if {[info exists ::PETK::gui::tab3ArbdStrideWidget] && \
+                [winfo exists $::PETK::gui::tab3ArbdStrideWidget]} {
+            $::PETK::gui::tab3ArbdStrideWidget configure -state disabled
+        }
+    }
+    # Advanced rows: only visible when both export is on AND advanced toggle is on.
+    ::PETK::gui::onArbdAdvancedToggle
+    if {[info procs ::PETK::gui::updateSEMParameterSummary] ne ""} {
+        ::PETK::gui::updateSEMParameterSummary
+    }
+}
+
+proc ::PETK::gui::onArbdAdvancedToggle {} {
+    set enabled 0
+    if {[info exists ::PETK::gui::arbdExportEnabled]} {
+        set enabled $::PETK::gui::arbdExportEnabled
+    }
+    set show 0
+    if {[info exists ::PETK::gui::arbdShowAdvanced]} {
+        set show $::PETK::gui::arbdShowAdvanced
+    }
+    set visible [expr {$enabled && $show}]
+    set state [expr {$visible ? "normal" : "disabled"}]
+    if {[info exists ::PETK::gui::tab3ArbdAdvancedWidgets]} {
+        foreach w $::PETK::gui::tab3ArbdAdvancedWidgets {
+            if {[winfo exists $w]} {
+                if {$visible} {
+                    if {[winfo manager $w] ne "grid"} {
+                        # Re-grid the widget on the row underneath the toggle.
+                        # We grid them as a 4-column row.
+                        # Easiest: rely on Tk's auto row-numbering since
+                        # we never manually un-rowed them; just ensure they
+                        # are visible.
+                    }
+                } else {
+                    # Keep them gridded but disabled. Hiding/showing causes
+                    # row reflow and is messy; greying is sufficient.
+                }
+                $w configure -state $state
+            }
+        }
+    }
+    # Ensure the advanced entries are gridded on a row that exists.
+    if {[info exists ::PETK::gui::tab3ArbdAdvancedRow0]} {
+        # Grid them once if they aren't already managed by grid.
+        set first [lindex $::PETK::gui::tab3ArbdAdvancedRow0 0]
+        if {[winfo exists $first] && [winfo manager $first] ne "grid"} {
+            eval grid $::PETK::gui::tab3ArbdAdvancedRow0 -sticky ew -pady 3
+        }
+    }
+}
+
+proc ::PETK::gui::onMeshModeChanged {} {
+    set mode "uniform"
+    if {[info exists ::PETK::gui::meshMode]} {
+        set mode $::PETK::gui::meshMode
+    }
+    set fbmode "auto"
+    if {[info exists ::PETK::gui::gmshFineBoxMode]} {
+        set fbmode $::PETK::gui::gmshFineBoxMode
+    }
+    set graded_state   [expr {$mode eq "multigrid"                          ? "normal" : "disabled"}]
+    set fb_manual_state [expr {$mode eq "multigrid" && $fbmode eq "manual" ? "normal" : "disabled"}]
+    set fb_auto_state   [expr {$mode eq "multigrid" && $fbmode eq "auto"   ? "normal" : "disabled"}]
+
+    if {[info exists ::PETK::gui::tab3MeshGradedWidgets]} {
+        foreach w $::PETK::gui::tab3MeshGradedWidgets {
+            if {[winfo exists $w]} { $w configure -state $graded_state }
+        }
+    }
+    if {[info exists ::PETK::gui::tab3MeshFineBoxManualWidgets]} {
+        foreach w $::PETK::gui::tab3MeshFineBoxManualWidgets {
+            if {[winfo exists $w]} { $w configure -state $fb_manual_state }
+        }
+    }
+    if {[info exists ::PETK::gui::tab3MeshFineBoxAutoWidgets]} {
+        foreach w $::PETK::gui::tab3MeshFineBoxAutoWidgets {
+            if {[winfo exists $w]} { $w configure -state $fb_auto_state }
+        }
+    }
     if {[info procs ::PETK::gui::updateSEMParameterSummary] ne ""} {
         ::PETK::gui::updateSEMParameterSummary
     }
@@ -502,9 +814,13 @@ proc ::PETK::gui::updateSemCalculationModeUI {} {
     if {[info exists ::PETK::gui::semCalculationMode]} {
         set mode $::PETK::gui::semCalculationMode
     }
-    set row 0
+    set movement_row 0
     if {[info exists ::PETK::gui::tab3MovementRow]} {
-        set row $::PETK::gui::tab3MovementRow
+        set movement_row $::PETK::gui::tab3MovementRow
+    }
+    set rotation_row [expr {$movement_row + 1}]
+    if {[info exists ::PETK::gui::tab3RotationRow]} {
+        set rotation_row $::PETK::gui::tab3RotationRow
     }
 
     set movement_frame {}
@@ -516,25 +832,29 @@ proc ::PETK::gui::updateSemCalculationModeUI {} {
         set rotation_frame $::PETK::gui::tab3RotationFrame
     }
 
-    if {$mode eq "run"} {
-        if {$rotation_frame ne "" && [winfo exists $rotation_frame] && [winfo manager $rotation_frame] eq "grid"} {
-            grid remove $rotation_frame
-        }
-        if {$movement_frame ne "" && [winfo exists $movement_frame] && [winfo manager $movement_frame] ne "grid"} {
-            grid $movement_frame -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
-        }
-    } else {
-        if {$movement_frame ne "" && [winfo exists $movement_frame] && [winfo manager $movement_frame] eq "grid"} {
+    set show_movement [expr {$mode eq "run"           || $mode eq "hybrid"}]
+    set show_rotation [expr {$mode eq "rotation_scan" || $mode eq "hybrid"}]
+
+    if {$movement_frame ne "" && [winfo exists $movement_frame]} {
+        set is_gridded [expr {[winfo manager $movement_frame] eq "grid"}]
+        if {$show_movement && !$is_gridded} {
+            grid $movement_frame -row $movement_row -column 0 -sticky ew -padx 10 -pady "5 5"
+        } elseif {!$show_movement && $is_gridded} {
             grid remove $movement_frame
         }
-        if {$rotation_frame ne "" && [winfo exists $rotation_frame] && [winfo manager $rotation_frame] ne "grid"} {
-            grid $rotation_frame -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
+    }
+    if {$rotation_frame ne "" && [winfo exists $rotation_frame]} {
+        set is_gridded [expr {[winfo manager $rotation_frame] eq "grid"}]
+        if {$show_rotation && !$is_gridded} {
+            grid $rotation_frame -row $rotation_row -column 0 -sticky ew -padx 10 -pady "5 5"
+        } elseif {!$show_rotation && $is_gridded} {
+            grid remove $rotation_frame
         }
     }
 
-    # Toggle widget states
-    set movement_state [expr {$mode eq "run" ? "normal" : "disabled"}]
-    set rotation_state [expr {$mode eq "rotation_scan" ? "normal" : "disabled"}]
+    # Toggle widget states based on which frame is active
+    set movement_state [expr {$show_movement ? "normal" : "disabled"}]
+    set rotation_state [expr {$show_rotation ? "normal" : "disabled"}]
 
     if {$movement_frame ne ""} {
         foreach w {start end step} {
@@ -546,7 +866,7 @@ proc ::PETK::gui::updateSemCalculationModeUI {} {
     }
 
     if {$rotation_frame ne ""} {
-        foreach w {samples boxx boxy boxz} {
+        foreach w {samples seed boxx boxy boxz} {
             set path [format "%s.%s" $rotation_frame $w]
             if {[winfo exists $path]} {
                 $path configure -state $rotation_state
@@ -554,8 +874,20 @@ proc ::PETK::gui::updateSemCalculationModeUI {} {
         }
     }
 
+    # In hybrid mode the bulk-electrolyte option doesn't apply (full FEM is forced).
+    if {[info exists ::PETK::gui::bulkElectrolyteButton] && \
+            [winfo exists $::PETK::gui::bulkElectrolyteButton]} {
+        if {$mode eq "hybrid"} {
+            $::PETK::gui::bulkElectrolyteButton configure -state disabled
+        } else {
+            $::PETK::gui::bulkElectrolyteButton configure -state normal
+        }
+    }
+
+    # Generate (preview) button: enabled when a translocation z-sweep is part of
+    # the run, i.e. for "run" and "hybrid" modes.
     if {[info exists ::PETK::gui::tab3ActionsGenerateButton] && [winfo exists $::PETK::gui::tab3ActionsGenerateButton]} {
-        $::PETK::gui::tab3ActionsGenerateButton configure -state [expr {$mode eq "run" ? "normal" : "disabled"}]
+        $::PETK::gui::tab3ActionsGenerateButton configure -state [expr {$show_movement ? "normal" : "disabled"}]
     }
 
     if {[info exists ::PETK::gui::tab3ActionsValidateButton] && [winfo exists $::PETK::gui::tab3ActionsValidateButton]} {
@@ -634,14 +966,38 @@ proc ::PETK::gui::updateSEMParameterSummary {} {
 
     # Input Configuration
     $widget insert end "INPUT CONFIGURATION:\n" {header}
-    $widget insert end "  Analyte PDB: $::PETK::gui::semAnalytePDB\n"
-    $widget insert end "  Python Environment: $::PETK::gui::condaEnvironment\n"
+    # Prefer the SEM-ready (centered) path; fall back to the raw analytePDB
+    # loaded in tab 2 if the centering workflow has not been run yet, and to
+    # an explicit "(not set)" otherwise. This keeps the summary readable even
+    # before validation has run.
+    set sem_pdb_for_summary "(not set)"
+    if {[info exists ::PETK::gui::semAnalytePDB] && $::PETK::gui::semAnalytePDB ne ""} {
+        set sem_pdb_for_summary $::PETK::gui::semAnalytePDB
+    } elseif {[info exists ::PETK::gui::analytePDB] && $::PETK::gui::analytePDB ne ""} {
+        set sem_pdb_for_summary "$::PETK::gui::analytePDB  (uncentered — run Center Analyte in tab 2)"
+    }
+    $widget insert end "  Analyte PDB: $sem_pdb_for_summary\n"
+    set conda_env_for_summary "(not set)"
+    if {[info exists ::PETK::gui::condaEnvironment] && $::PETK::gui::condaEnvironment ne ""} {
+        set conda_env_for_summary $::PETK::gui::condaEnvironment
+    }
+    $widget insert end "  Python Environment: $conda_env_for_summary\n"
     $widget insert end "\n"
 
     $widget insert end "CALCULATION MODE:\n" {header}
+    set seed_text "42"
+    if {[info exists ::PETK::gui::rotationSeed]} {
+        set seed_text $::PETK::gui::rotationSeed
+    }
     if {$calc_mode eq "rotation_scan"} {
         $widget insert end "  Mode: rotation_scan (rotation-based sampling)\n"
         $widget insert end "  Samples: $::PETK::gui::rotationSamples\n"
+        $widget insert end "  Random seed: $seed_text\n"
+    } elseif {$calc_mode eq "hybrid"} {
+        $widget insert end "  Mode: hybrid (translocation + rotation)\n"
+        $widget insert end "  Samples: $::PETK::gui::rotationSamples\n"
+        $widget insert end "  Random seed: $seed_text\n"
+        $widget insert end "  Z-sweep applied at every rotation.\n"
     } else {
         $widget insert end "  Mode: run (vertical passage)\n"
     }
@@ -809,15 +1165,37 @@ proc ::PETK::gui::updateSEMParameterSummary {} {
     set prep_mode "pdb2pqr (CHARMM)"
     $widget insert end "  Structure Prep: $prep_mode\n"
     $widget insert end "  Default Radius: $::PETK::gui::semDefaultRadius Å\n"
+
+    # Mesh mode (uniform / graded) and graded-mesh parameters.
+    set mesh_mode_disp "uniform"
+    if {[info exists ::PETK::gui::meshMode]} {
+        set mesh_mode_disp $::PETK::gui::meshMode
+    }
+    $widget insert end "  Mesh Mode: $mesh_mode_disp\n"
+    if {$mesh_mode_disp eq "multigrid"} {
+        $widget insert end "    Fine cell size:   $::PETK::gui::gmshFineSize Å\n"
+        $widget insert end "    Coarse cell size: $::PETK::gui::gmshCoarseSize Å\n"
+        set fb_mode_disp "auto"
+        if {[info exists ::PETK::gui::gmshFineBoxMode]} {
+            set fb_mode_disp $::PETK::gui::gmshFineBoxMode
+        }
+        if {$fb_mode_disp eq "manual"} {
+            $widget insert end \
+                "    Fine box (Å):     $::PETK::gui::gmshFineBoxX × $::PETK::gui::gmshFineBoxY × $::PETK::gui::gmshFineBoxZ  (explicit)\n"
+        } else {
+            $widget insert end \
+                "    Fine box auto-margin: $::PETK::gui::gmshAutoMargin Å (computed per pore)\n"
+        }
+    }
     $widget insert end "\n"
     
-    if {$calc_mode eq "run"} {
-        # Movement Parameters
+    if {$calc_mode eq "run" || $calc_mode eq "hybrid"} {
+        # Movement Parameters (used in run and hybrid)
         $widget insert end "MOVEMENT PARAMETERS:\n" {header}
         $widget insert end "  Z Start: $::PETK::gui::zStartRange Å\n"
         $widget insert end "  Z End: $::PETK::gui::zEndRange Å\n"
         $widget insert end "  Z Step: $::PETK::gui::zStep Å\n"
-        
+
         if {[string is double $::PETK::gui::zStartRange] && [string is double $::PETK::gui::zEndRange] && [string is double $::PETK::gui::zStep]} {
             set range [expr {abs($::PETK::gui::zEndRange - $::PETK::gui::zStartRange)}]
             set num_steps [expr {int($range / $::PETK::gui::zStep) + 1}]
@@ -825,9 +1203,13 @@ proc ::PETK::gui::updateSEMParameterSummary {} {
             $widget insert end "  Total Range: $range Å\n"
         }
         $widget insert end "\n"
-    } else {
+    }
+    if {$calc_mode eq "rotation_scan" || $calc_mode eq "hybrid"} {
         $widget insert end "ROTATION PARAMETERS:\n" {header}
         $widget insert end "  Samples: $::PETK::gui::rotationSamples\n"
+        if {[info exists ::PETK::gui::rotationSeed]} {
+            $widget insert end "  Random seed: $::PETK::gui::rotationSeed\n"
+        }
         $widget insert end "\n"
     }
     
@@ -1150,10 +1532,17 @@ dolfinx_packages = \['dolfinx', 'mpi4py', 'petsc4py'\]
 # SEM package itself
 sem_packages = \['sem'\]
 
+# Optional features. Their absence does not block ALL_OK, but disables a
+# feature in PETK:
+#   gmsh          → multigrid (graded) mesh path; uniform mesh still works.
+#   gridData      → ARBD .dx export. Open-pore current still works.
+optional_packages = \['gmsh', 'gridData'\]
+
 all_packages = core_packages + dolfinx_packages + sem_packages
 missing = \[\]
 available = \[\]
 warnings = \[\]
+optional_missing = \[\]
 
 for package in all_packages:
     try:
@@ -1223,12 +1612,24 @@ for package in all_packages:
         missing.append(package)
         print(f'{package} FAILED: {e}')
 
+# Probe optional packages (do not affect ALL_OK)
+for package in optional_packages:
+    try:
+        __import__(package)
+        available.append(package)
+        print(f'{package} OK (optional)')
+    except ImportError:
+        optional_missing.append(package)
+        print(f'{package} OPTIONAL-MISSING')
+
 print(f'AVAILABLE: {available}')
 if missing:
     print(f'MISSING: {missing}')
+if optional_missing:
+    print(f'OPTIONAL_MISSING: {optional_missing}')
 if warnings:
     print(f'WARNINGS: {warnings}')
-    
+
 if not missing:
     print('ALL_OK')
 else:
@@ -1271,7 +1672,22 @@ else:
         set clean_available [string map {"'" "" "," ", "} $available_list]
         ::PETK::gui::appendStatusDisplay "Available packages: $clean_available"
     }
-    
+
+    # Show OPTIONAL packages that are missing, with install hints. These do
+    # not block ALL_OK because the affected features (multigrid mesh, ARBD
+    # export) are opt-in, but PETK can warn the user up front so a later run
+    # doesn't fail with "ModuleNotFoundError: No module named 'gmsh'".
+    if {[regexp {OPTIONAL_MISSING: \[(.*?)\]} $result match opt_missing_list]} {
+        set clean_opt [string map {"'" "" "," ", "} $opt_missing_list]
+        ::PETK::gui::appendStatusDisplay "ℹ️ Optional packages missing: $clean_opt"
+        if {[string match "*gmsh*" $clean_opt]} {
+            ::PETK::gui::appendStatusDisplay "    Multigrid mesh disabled. To enable: pip install gmsh  (in the conda env)"
+        }
+        if {[string match "*gridData*" $clean_opt]} {
+            ::PETK::gui::appendStatusDisplay "    ARBD .dx export disabled. To enable: pip install gridDataFormats"
+        }
+    }
+
     # Show warnings if any
     if {[regexp {WARNINGS: \[(.*?)\]} $result match warnings_list]} {
         set clean_warnings [string map {"'" "" "," ", "} $warnings_list]
@@ -1333,9 +1749,25 @@ proc ::PETK::gui::createSEMEnvironment {} {
     }
 
     ::PETK::gui::appendStatusDisplay "✅ pdb2pqr installed successfully!"
+    ::PETK::gui::appendStatusDisplay "Installing optional features: gmsh (multigrid mesh) and gridDataFormats (ARBD .dx export)..."
+    update
+
+    # Step 3b: Install optional pip packages — gmsh for the multigrid mesh
+    # path, gridDataFormats for ARBD potential-grid export. Failures here are
+    # NON-fatal because both features are opt-in; uniform mesh and open-pore
+    # current still work without them.
+    set optional_cmd [list conda run -n sem-dolfinx pip install gmsh gridDataFormats]
+    if {[catch {exec {*}$optional_cmd} optional_result]} {
+        ::PETK::gui::appendStatusDisplay "⚠️ Warning: Optional package install failed (non-fatal):"
+        ::PETK::gui::appendStatusDisplay "$optional_result"
+        ::PETK::gui::appendStatusDisplay "Multigrid mesh and ARBD export will be disabled. Install manually with:"
+        ::PETK::gui::appendStatusDisplay "    conda run -n sem-dolfinx pip install gmsh gridDataFormats"
+    } else {
+        ::PETK::gui::appendStatusDisplay "✅ gmsh + gridDataFormats installed successfully!"
+    }
     ::PETK::gui::appendStatusDisplay "Installing local package in development mode..."
     update
-    
+
     # Step 4: Install local package in development mode
     # Determine repository root (parent directory of the petk module dir)
     set module_dir [::PETK::gui::resourcePath]
@@ -1448,12 +1880,24 @@ proc ::PETK::gui::validateSEMSetup {} {
         set bio_pore_filename ""
         
         if {[info exists ::PETK::gui::selectedBioPore] && $::PETK::gui::selectedBioPore ne ""} {
-            # Check if selectedBioPore is already a full path
-            if {[file exists $::PETK::gui::selectedBioPore]} {
+            # Delegate to the canonical resolver from tab 1, which checks (in order):
+            #   1. selectedBioPore as an absolute path
+            #   2. ::PETK::gui::bioPorePathMap (built when tab 1 scans bio_pore dirs)
+            #   3. ::PETK::gui::getBioPoreSearchDirs — both [pwd]/bio_pore AND the
+            #      install-asset path returned by ::PETK::gui::resourcePath bio_pore
+            # Fall back to the legacy two-path search if (somehow) the helper is
+            # missing — e.g. tab 1 hasn't been sourced or initialised.
+            set resolved ""
+            if {[info procs ::PETK::gui::resolveBioPoreFile] ne ""} {
+                set resolved [::PETK::gui::resolveBioPoreFile $::PETK::gui::selectedBioPore]
+            }
+            if {$resolved ne "" && [file exists $resolved]} {
+                set bio_pore_source $resolved
+                set bio_pore_filename [file tail $resolved]
+            } elseif {[file exists $::PETK::gui::selectedBioPore]} {
                 set bio_pore_source $::PETK::gui::selectedBioPore
                 set bio_pore_filename [file tail $::PETK::gui::selectedBioPore]
             } else {
-                # Try to find it in pwd/bio_pore
                 set pwd_bio_pore [file join [pwd] "bio_pore" $::PETK::gui::selectedBioPore]
                 if {[file exists $pwd_bio_pore]} {
                     set bio_pore_source $pwd_bio_pore
@@ -1564,8 +2008,54 @@ proc ::PETK::gui::validateSEMSetup {} {
         {sysPadding "Distance putoff"}
         {gridResolution "Grid resolution"}
     }
-    if {$calc_mode eq "run"} {
+    if {$calc_mode eq "run" || $calc_mode eq "hybrid"} {
         lappend positive_params {zStep "Z step size"}
+    }
+    # Multigrid-mesh parameters must be positive when multigrid mesh is selected.
+    set mesh_mode_validate "uniform"
+    if {[info exists ::PETK::gui::meshMode]} {
+        set mesh_mode_validate $::PETK::gui::meshMode
+    }
+    if {$mesh_mode_validate eq "multigrid"} {
+        lappend positive_params {gmshFineSize "Multigrid fine cell size"}
+        lappend positive_params {gmshCoarseSize "Multigrid coarse cell size"}
+        set fb_mode_validate "auto"
+        if {[info exists ::PETK::gui::gmshFineBoxMode]} {
+            set fb_mode_validate $::PETK::gui::gmshFineBoxMode
+        }
+        if {$fb_mode_validate eq "manual"} {
+            lappend positive_params {gmshFineBoxX "Multigrid fine box X"}
+            lappend positive_params {gmshFineBoxY "Multigrid fine box Y"}
+            lappend positive_params {gmshFineBoxZ "Multigrid fine box Z"}
+        } else {
+            lappend positive_params {gmshAutoMargin "Multigrid auto-margin"}
+        }
+        # Sanity: fine should not exceed coarse.
+        if {[info exists ::PETK::gui::gmshFineSize] && \
+                [info exists ::PETK::gui::gmshCoarseSize] && \
+                [string is double -strict $::PETK::gui::gmshFineSize] && \
+                [string is double -strict $::PETK::gui::gmshCoarseSize]} {
+            if {$::PETK::gui::gmshFineSize > $::PETK::gui::gmshCoarseSize} {
+                lappend errors \
+                    "Multigrid fine cell size ($::PETK::gui::gmshFineSize Å) is larger than coarse cell size ($::PETK::gui::gmshCoarseSize Å); the relationship should be reversed."
+            }
+        }
+        # Consistency: the σ field is sampled on a uniform grid of spacing
+        # gridResolution and then interpolated onto the gmsh tet mesh. If
+        # gridResolution is much coarser than gmshFineSize, the fine mesh
+        # cells query an under-resolved σ field and the wall transition
+        # (~3 Å wide for SimpleConductivityModel) is poorly represented —
+        # the FEM mesh fineness is wasted there. Flag a warning when the
+        # σ grid is more than 50% coarser than the fine cells.
+        if {[info exists ::PETK::gui::gridResolution] && \
+                [info exists ::PETK::gui::gmshFineSize] && \
+                [string is double -strict $::PETK::gui::gridResolution] && \
+                [string is double -strict $::PETK::gui::gmshFineSize]} {
+            if {$::PETK::gui::gridResolution > 1.5 * $::PETK::gui::gmshFineSize} {
+                lappend warnings \
+                    "Grid resolution ($::PETK::gui::gridResolution Å) is much coarser than the multigrid fine cell size ($::PETK::gui::gmshFineSize Å). The σ field will be sampled at $::PETK::gui::gridResolution Å spacing across the whole box, so the fine mesh cells around the pore are interpolating from an under-resolved σ. Consider lowering Grid resolution to about $::PETK::gui::gmshFineSize Å (memory cost: scales as 1/L³)."
+            }
+        }
     }
     
     # Add pore-specific positive parameters based on pore type
@@ -1599,32 +2089,40 @@ proc ::PETK::gui::validateSEMSetup {} {
         }
     }
 
-    # Check Z coordinate parameters (can be negative, just need to be valid numbers)
-    if {$calc_mode eq "run"} {
+    # Check Z coordinate parameters (can be negative, just need to be valid numbers).
+    # Required in any mode that performs translocation: "run" and "hybrid".
+    if {$calc_mode eq "run" || $calc_mode eq "hybrid"} {
         set z_coord_params {
             {zStartRange "Z start position"}
             {zEndRange "Z end position"}
         }
-        
+
         foreach param_info $z_coord_params {
             set var_name [lindex $param_info 0]
             set display_name [lindex $param_info 1]
             set var_value [set ::PETK::gui::$var_name]
-            
+
             if {![string is double $var_value]} {
                 lappend errors "$display_name is not a valid number: $var_value"
             }
         }
-        
+
         if {[string is double $::PETK::gui::zStartRange] && [string is double $::PETK::gui::zEndRange] && [string is double $::PETK::gui::zStep]} {
             set z_range [expr {abs($::PETK::gui::zStartRange - $::PETK::gui::zEndRange)}]
             if {$z_range <= $::PETK::gui::zStep} {
                 lappend errors "Z range (|Zend - Zstart| = $z_range) must be greater than Z step size ($::PETK::gui::zStep)"
             }
         }
-    } else {
+    }
+    # Rotation samples (and seed) required in any mode that samples rotations:
+    # "rotation_scan" and "hybrid".
+    if {$calc_mode eq "rotation_scan" || $calc_mode eq "hybrid"} {
         if {![string is integer -strict $::PETK::gui::rotationSamples] || $::PETK::gui::rotationSamples <= 0} {
             lappend errors "Rotation samples must be a positive integer"
+        }
+        if {[info exists ::PETK::gui::rotationSeed] && \
+                ![string is integer -strict $::PETK::gui::rotationSeed]} {
+            lappend errors "Random seed must be an integer (got: $::PETK::gui::rotationSeed)"
         }
     }
 
@@ -1979,14 +2477,77 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
     append json_content "    \"use_pdb2pqr\": $use_pdb2pqr_json,\n"
     append json_content "    \"force_field\": \"$sem_force_field\",\n"
     append json_content "    \"default_radius\": $::PETK::gui::semDefaultRadius,\n"
-    append json_content "    \"membrane_conductivity\": $::PETK::gui::membraneConductivity\n"
-    
+
+    # If graded mesh is selected, append mesh_engine and gmsh_* fields. The
+    # fine box is either explicit X/Y/Z or auto-computed per pore widest +
+    # 2 × margin in XY and membrane_thickness + 2 × margin in Z.
+    set mesh_mode_local "uniform"
+    if {[info exists ::PETK::gui::meshMode]} {
+        set mesh_mode_local $::PETK::gui::meshMode
+    }
+    if {$mesh_mode_local eq "multigrid"} {
+        append json_content "    \"membrane_conductivity\": $::PETK::gui::membraneConductivity,\n"
+        append json_content "    \"mesh_engine\": \"gmsh\",\n"
+        append json_content "    \"gmsh_fine_size\": $::PETK::gui::gmshFineSize,\n"
+        append json_content "    \"gmsh_coarse_size\": $::PETK::gui::gmshCoarseSize,\n"
+
+        set fb_mode "auto"
+        if {[info exists ::PETK::gui::gmshFineBoxMode]} {
+            set fb_mode $::PETK::gui::gmshFineBoxMode
+        }
+        if {$fb_mode eq "manual"} {
+            set fb_x $::PETK::gui::gmshFineBoxX
+            set fb_y $::PETK::gui::gmshFineBoxY
+            set fb_z $::PETK::gui::gmshFineBoxZ
+        } else {
+            # Auto-compute from pore widest + 2*margin and membrane + 2*margin.
+            set margin $::PETK::gui::gmshAutoMargin
+            set widest_diam_A 0.0
+            if {[info exists ::PETK::gui::membraneType]} {
+                if {$::PETK::gui::membraneType eq "cylindrical" && \
+                        [info exists ::PETK::gui::cylindricalDiameter] && \
+                        [string is double -strict $::PETK::gui::cylindricalDiameter]} {
+                    set widest_diam_A $::PETK::gui::cylindricalDiameter
+                } elseif {$::PETK::gui::membraneType eq "doublecone" && \
+                        [info exists ::PETK::gui::outerDiameter] && \
+                        [string is double -strict $::PETK::gui::outerDiameter]} {
+                    set widest_diam_A $::PETK::gui::outerDiameter
+                } elseif {$::PETK::gui::membraneType eq "conical"} {
+                    set top_d 0.0
+                    set bot_d 0.0
+                    if {[info exists ::PETK::gui::topDiameter] && \
+                            [string is double -strict $::PETK::gui::topDiameter]} {
+                        set top_d $::PETK::gui::topDiameter
+                    }
+                    if {[info exists ::PETK::gui::bottomDiameter] && \
+                            [string is double -strict $::PETK::gui::bottomDiameter]} {
+                        set bot_d $::PETK::gui::bottomDiameter
+                    }
+                    set widest_diam_A [expr {max($top_d, $bot_d)}]
+                }
+            }
+            set fb_x [expr {$widest_diam_A + 2.0 * $margin}]
+            set fb_y $fb_x
+            set membrane_A 0.0
+            if {[info exists ::PETK::gui::nanoporeThickness] && \
+                    [string is double -strict $::PETK::gui::nanoporeThickness]} {
+                set membrane_A $::PETK::gui::nanoporeThickness
+            }
+            set fb_z [expr {$membrane_A + 2.0 * $margin}]
+        }
+        append json_content "    \"gmsh_fine_box\": \[$fb_x, $fb_y, $fb_z\]\n"
+    } else {
+        append json_content "    \"membrane_conductivity\": $::PETK::gui::membraneConductivity\n"
+    }
+
     append json_content "  },\n"
     
     # Movement section
     set movement_z_start $::PETK::gui::zStartRange
     set movement_z_end $::PETK::gui::zEndRange
     if {[info exists ::PETK::gui::semCalculationMode] && $::PETK::gui::semCalculationMode eq "rotation_scan"} {
+        # Pure rotation scan evaluates at a single z (set both bounds to 0); hybrid
+        # mode keeps the user-configured z-sweep so each rotation gets a full pass.
         set movement_z_start 0.0
         set movement_z_end 0.0
     }
@@ -1999,7 +2560,74 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
     # Output section
     append json_content "  \"output\": {\n"
     append json_content "    \"output_prefix\": \"$::PETK::gui::outputPrefix\",\n"
-    append json_content "    \"preview_frames\": $::PETK::gui::semPreviewFrames\n"
+
+    # If ARBD export is enabled, append a structured arbd_export block. The
+    # SEM CLI auto-detects this and runs export_arbd_grids without needing
+    # any extra command-line flag from PETK.
+    set arbd_on 0
+    if {[info exists ::PETK::gui::arbdExportEnabled]} {
+        set arbd_on $::PETK::gui::arbdExportEnabled
+    }
+    if {$arbd_on} {
+        append json_content "    \"preview_frames\": $::PETK::gui::semPreviewFrames,\n"
+        append json_content "    \"arbd_export\": {\n"
+
+        # Parse ions string "POT:+1,CLA:-1" into a JSON list of [name, charge].
+        # The user-friendly CLI form `+1` for charges is NOT valid JSON
+        # (JSON's number grammar only allows a leading minus), so we coerce
+        # the charge through `expr {$q + 0}` before emitting. That converts
+        # "+1" → 1, "1.0" → 1.0, "-1" → -1, etc., and produces JSON that
+        # `json.load` accepts.
+        set ions_str $::PETK::gui::arbdIons
+        set ions_json_parts {}
+        foreach token [split $ions_str ","] {
+            set token [string trim $token]
+            if {$token eq ""} { continue }
+            set parts [split $token ":"]
+            if {[llength $parts] != 2} { continue }
+            set name [string trim [lindex $parts 0]]
+            set q_str [string trim [lindex $parts 1]]
+            if {![string is double -strict $q_str]} { continue }
+            # Numeric coercion drops any leading `+`. Integer charges stay
+            # integer-formatted (e.g. 1, -1); fractional charges keep their
+            # decimal form.
+            if {[string is integer -strict $q_str]
+                || ([string match "+*" $q_str]
+                    && [string is integer -strict [string range $q_str 1 end]])
+                || ([string match "-*" $q_str]
+                    && [string is integer -strict [string range $q_str 1 end]])} {
+                set q [expr {int($q_str)}]
+            } else {
+                set q [expr {double($q_str)}]
+            }
+            lappend ions_json_parts "        \[\"$name\", $q\]"
+        }
+        append json_content "      \"ions\": \[\n"
+        append json_content [join $ions_json_parts ",\n"]
+        append json_content "\n      \],\n"
+
+        # Resolution: only emit if the user typed something parseable.
+        set res $::PETK::gui::arbdResolutionA
+        if {[string is double -strict $res] && $res > 0.0} {
+            append json_content "      \"resolution\": $res,\n"
+        }
+
+        set stride $::PETK::gui::arbdStride
+        if {![string is integer -strict $stride]} { set stride 0 }
+        append json_content "      \"stride\": $stride,\n"
+
+        set wall $::PETK::gui::arbdWallHeight
+        if {![string is double -strict $wall]} { set wall 100.0 }
+        append json_content "      \"wall_height\": $wall,\n"
+
+        set tk $::PETK::gui::arbdTemperatureK
+        if {![string is double -strict $tk]} { set tk 295.0 }
+        append json_content "      \"temperature_K\": $tk\n"
+
+        append json_content "    }\n"
+    } else {
+        append json_content "    \"preview_frames\": $::PETK::gui::semPreviewFrames\n"
+    }
     append json_content "  },\n"
     
     # Box dimensions section
@@ -2066,6 +2694,12 @@ proc ::PETK::gui::runPreviewFromGUI {} {
         }
         "rotation_scan" {
             ::PETK::gui::runRotationPreview
+        }
+        "hybrid" {
+            # Hybrid combines a Z-sweep with rotational sampling. The most
+            # informative single preview is the vertical trajectory; the
+            # rotational sampling is exercised in the actual run.
+            ::PETK::gui::runVerticalPreview
         }
         default {
             tk_messageBox -icon info -title "Preview Unavailable" \
@@ -2550,15 +3184,22 @@ proc ::PETK::gui::run_sem_calculation {config_file} {
     # Prepare base sem command
     set env_name $::PETK::gui::condaEnvironment
     set base_cmd [list conda run -n $::PETK::gui::condaEnvironment python -m sem]
-    if {$calc_mode eq "rotation_scan"} {
+    if {$calc_mode eq "rotation_scan" || $calc_mode eq "hybrid"} {
+        set scan_label [expr {$calc_mode eq "hybrid" ? "hybrid" : "rotation scan"}]
         if {![string is integer -strict $::PETK::gui::rotationSamples] || $::PETK::gui::rotationSamples <= 0} {
-            set msg "Rotation samples must be a positive integer before running rotation scan."
+            set msg "Rotation samples must be a positive integer before running ${scan_label}."
             puts $msg
-            tk_messageBox -icon error -title "Rotation Scan Error" -message $msg
+            tk_messageBox -icon error -title "Run Error" -message $msg
             return -code error $msg
         }
         set rotation_samples [expr {int($::PETK::gui::rotationSamples)}]
-        set final_cmd [concat $base_cmd [list rotation_scan $config_basename --samples $rotation_samples --seed 42 --mode run]]
+        set rotation_seed 42
+        if {[info exists ::PETK::gui::rotationSeed] && \
+                [string is integer -strict $::PETK::gui::rotationSeed]} {
+            set rotation_seed [expr {int($::PETK::gui::rotationSeed)}]
+        }
+        set final_cmd [concat $base_cmd [list rotation_scan $config_basename \
+            --samples $rotation_samples --seed $rotation_seed --mode run]]
         if {[info exists ::PETK::gui::reuseSemMesh] && $::PETK::gui::reuseSemMesh} {
             lappend final_cmd --reuse-mesh
         }
@@ -3026,6 +3667,171 @@ proc ::PETK::gui::applyPlotEnhancements {} {
         return $entries
     }
 
+    # Render hybrid_currents.csv (full z × rotation trace) as a two-panel figure:
+    #   1. heatmap of current(z, rotation_idx) — shows every (z, rotation) cell
+    #   2. mean ± 1 std band over z — orientation-averaged behaviour with spread
+    # Also writes hybrid_summary.csv with per-z statistics (mean, std, min, max,
+    # n_rotations) for downstream analysis. Skipped rotations (NaN currents
+    # from overlap detection) are handled with np.nanmean / np.nanstd, so they
+    # don't contaminate the band.
+    proc ::PETK::gui::plot::plotHybridCurrentsCsv {csv_path} {
+        if {![file exists $csv_path]} {
+            tk_messageBox -icon error -title "Plot Error" \
+                -message "Hybrid CSV not found: $csv_path"
+            return
+        }
+        set out_dir [file dirname $csv_path]
+        set output_path [file join $out_dir "hybrid_heatmap_meanstd.png"]
+        set summary_path [file join $out_dir "hybrid_summary.csv"]
+        set output_path_py  [string map {"\\" "\\\\"} $output_path]
+        set summary_path_py [string map {"\\" "\\\\"} $summary_path]
+        set csv_path_py     [string map {"\\" "\\\\"} $csv_path]
+        set python_script_path [file join $out_dir "plot_hybrid_currents.py"]
+
+        set python_code [format {import csv
+from collections import defaultdict
+import numpy as np
+import matplotlib.pyplot as plt
+
+csv_path = r"%s"
+output_path = r"%s"
+summary_path = r"%s"
+
+# ---- Load (idx, z) -> current. Group by rotation index. ---------------------
+by_rot = defaultdict(dict)   # idx -> {z: current}
+rot_meta = {}                # idx -> (rx, ry, rz)
+all_z = set()
+with open(csv_path, "r", newline="") as fh:
+    reader = csv.DictReader(fh)
+    for row in reader:
+        try:
+            idx = int(row["index"])
+            z = float(row["z_A"])
+            current = float(row["current_nA"])
+        except (KeyError, ValueError):
+            continue
+        by_rot[idx][z] = current
+        all_z.add(z)
+        rot_meta[idx] = (row.get("rx", ""), row.get("ry", ""), row.get("rz", ""))
+
+if not by_rot or not all_z:
+    print("No usable rows in", csv_path)
+else:
+    sorted_idx = sorted(by_rot.keys())
+    z_grid = np.array(sorted(all_z))
+    n_rot = len(sorted_idx)
+    n_z = len(z_grid)
+
+    # ---- Build (n_rot, n_z) matrix; NaN where a (z, rot) cell is missing. ----
+    mat = np.full((n_rot, n_z), np.nan)
+    for i, idx in enumerate(sorted_idx):
+        for j, z in enumerate(z_grid):
+            if z in by_rot[idx]:
+                mat[i, j] = by_rot[idx][z]
+
+    # NaN-safe mean / std across rotations at each z (skipped rotations
+    # contribute NaN and are excluded from the statistics).
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean_current = np.nanmean(mat, axis=0)
+        std_current  = np.nanstd(mat,  axis=0)
+        n_valid      = np.sum(~np.isnan(mat), axis=0)
+        min_current  = np.nanmin(mat, axis=0)
+        max_current  = np.nanmax(mat, axis=0)
+
+    # ---- Two-panel figure: heatmap on top, mean ± std on bottom. -------------
+    fig, (ax_hm, ax_ms) = plt.subplots(
+        2, 1, figsize=(9.5, 8.0), sharex=True,
+        gridspec_kw={"height_ratios": [2, 1]},
+    )
+
+    # Heatmap. pcolormesh with an explicit edges-style grid so each cell is
+    # accurately positioned. Use the "viridis" cmap (perceptually uniform).
+    if n_z > 1:
+        dz = np.diff(z_grid)
+        z_edges = np.concatenate([
+            [z_grid[0] - dz[0] / 2.0],
+            z_grid[:-1] + dz / 2.0,
+            [z_grid[-1] + dz[-1] / 2.0],
+        ])
+    else:
+        z_edges = np.array([z_grid[0] - 0.5, z_grid[0] + 0.5])
+    rot_edges = np.arange(n_rot + 1) - 0.5
+    pcm = ax_hm.pcolormesh(
+        z_edges, rot_edges, mat, cmap="viridis", shading="auto",
+    )
+    ax_hm.set_ylabel("Rotation index", fontsize=12, weight="bold")
+    ax_hm.set_title(
+        f"Hybrid: current(z, rotation) — {n_rot} rotations × {n_z} z-positions",
+        fontsize=13, weight="bold",
+    )
+    cbar = fig.colorbar(pcm, ax=ax_hm, pad=0.02)
+    cbar.set_label("Current (nA)", fontsize=11)
+    if n_rot <= 30:
+        ax_hm.set_yticks(np.arange(n_rot))
+
+    # Mean ± std band.
+    ax_ms.plot(z_grid, mean_current, "-", color="C0", linewidth=2.0,
+               label="Mean over rotations")
+    ax_ms.fill_between(
+        z_grid, mean_current - std_current, mean_current + std_current,
+        color="C0", alpha=0.25, label="± 1 std",
+    )
+    # Faint min/max envelope so outliers are visible.
+    ax_ms.plot(z_grid, min_current, ":", color="gray", linewidth=0.9,
+               alpha=0.7, label="min / max")
+    ax_ms.plot(z_grid, max_current, ":", color="gray", linewidth=0.9,
+               alpha=0.7)
+    ax_ms.set_xlabel("Z position (Å)", fontsize=12, weight="bold")
+    ax_ms.set_ylabel("Current (nA)", fontsize=12, weight="bold")
+    ax_ms.legend(loc="best", fontsize=9)
+    ax_ms.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    print(f"Saved {output_path}")
+
+    # ---- Per-z summary CSV for downstream analysis. -------------------------
+    with open(summary_path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["z_A", "mean_current_nA", "std_current_nA",
+                    "min_current_nA", "max_current_nA", "n_rotations"])
+        for k, z in enumerate(z_grid):
+            row = [
+                f"{z:.4f}",
+                f"{mean_current[k]:.6e}" if np.isfinite(mean_current[k]) else "",
+                f"{std_current[k]:.6e}"  if np.isfinite(std_current[k])  else "",
+                f"{min_current[k]:.6e}"  if np.isfinite(min_current[k])  else "",
+                f"{max_current[k]:.6e}"  if np.isfinite(max_current[k])  else "",
+                int(n_valid[k]),
+            ]
+            w.writerow(row)
+    print(f"Saved {summary_path}")
+
+    plt.show()
+} $csv_path_py $output_path_py $summary_path_py]
+
+        if {[catch {
+            set fh [open $python_script_path w]
+            puts $fh $python_code
+            close $fh
+        } write_error]} {
+            tk_messageBox -icon error -title "Plot Error" \
+                -message "Failed to write hybrid plot script:\n$write_error"
+            return
+        }
+
+        set python_exec "python3"
+        if {[info exists ::PETK::gui::pythonExecutable] && $::PETK::gui::pythonExecutable ne ""} {
+            set python_exec $::PETK::gui::pythonExecutable
+        }
+        if {[catch {set plot_output [exec $python_exec $python_script_path]} err]} {
+            tk_messageBox -icon error -title "Plot Error" \
+                -message "Hybrid plot failed:\n$err"
+        } else {
+            puts $plot_output
+        }
+    }
+
     proc ::PETK::gui::plot::plotRotationHistogram {} {
     set candidate_dirs {}
     if {[info exists ::PETK::gui::workdir] && $::PETK::gui::workdir ne ""} {
@@ -3054,6 +3860,18 @@ proc ::PETK::gui::applyPlotEnhancements {} {
         }
     }
 
+    # First pass: detect hybrid output (full z × rotation trace). If found, render
+    # a current-vs-z overlay (one curve per rotation) and return early — this
+    # plot supersedes the histogram for hybrid runs.
+    foreach dir $norm_candidates {
+        if {![file isdirectory $dir]} { continue }
+        set hybrid_csv [file join $dir "hybrid_currents.csv"]
+        if {[file exists $hybrid_csv]} {
+            ::PETK::gui::plot::plotHybridCurrentsCsv $hybrid_csv
+            return
+        }
+    }
+
     set base_dir ""
     set entries {}
     foreach dir $norm_candidates {
@@ -3071,7 +3889,7 @@ proc ::PETK::gui::applyPlotEnhancements {} {
     if {$base_dir eq ""} {
         set searched [join $norm_candidates "\n  • "]
         tk_messageBox -icon info -title "Plot Rotation Scan" \
-            -message "No rotation scan data found in any of the expected locations:\n  • $searched\nRun a rotation scan first, or copy the results into one of these directories."
+            -message "No rotation scan data found in any of the expected locations:\n  • $searched\nRun a rotation scan or hybrid run first, or copy the results into one of these directories."
         return
     }
 

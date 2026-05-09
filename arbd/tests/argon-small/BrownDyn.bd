@@ -1,0 +1,20 @@
+timestep 2e-6
+steps 1000000
+
+temperature 295
+outputPeriod 1000
+outputEnergyPeriod 1000
+decompPeriod 100
+outputFormat dcd
+
+cutoff 10.0
+
+# Potassium
+particle POT
+num 8000
+gridFile pmf.dx 
+gridFileScale 1.0
+diffusion 5
+
+tabulatedPotential  1
+tabulatedFile 0@0@vdw.dat

@@ -1,0 +1,20 @@
+seed 992
+timestep 100e-6
+steps 1000000
+
+temperature 295
+electricField 0.0
+outputPeriod 100
+outputEnergyPeriod 100
+cutoff 100.0
+
+# Potassium
+particle POT
+num 2
+# num 9000
+# gridFile null.dx
+gridFile null2.dx
+diffusionGridFile diffusion.POT.dx
+
+tabulatedPotential  1
+tabulatedFile 0@0@dummy-pot.dat

@@ -1,0 +1,29 @@
+timestep 2e-6
+steps 100000000
+numberFluct 0
+interparticleForce 1
+fullLongRange 0
+temperature 295
+electricField 0.0
+outputPeriod 10000
+outputEnergyPeriod 100000
+decompPeriod 10000
+outputFormat dcd
+cutoff 10.0
+currentSegmentZ 40.0
+
+ParticleDynamicType Langevin
+ParticleLangevinIntegrator BAOAB
+
+# Potassium
+particle POT
+num 64000
+gridFile pmf.dx
+transDamping 1000 1000 1000
+mass 40
+charge 1.0
+radius 1.76375
+eps 0.087
+
+tabulatedPotential  1
+tabulatedFile 0@0@vdw.dat

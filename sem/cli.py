@@ -288,6 +288,9 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
         output_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[tuple[int, float, float, float, float]] = []
+    # Hybrid trace: rows of (idx, rx, ry, rz, z, current, normalized_current, blockage),
+    # populated only when mode == 'run' so PETK can render a (z × rotation) overlay.
+    hybrid_rows: list[tuple[int, float, float, float, float, float, float, float]] = []
     prefix_base = base_config_copy["output"].get("output_prefix", "vertical_movement")
 
     for offset, rotation_spec in enumerate(rotations):
@@ -368,6 +371,29 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
                 if rank == 0 and run_results and len(run_results.get("currents", [])) > 0:
                     final_current = float(run_results["currents"][-1])
                     results.append((idx, rotation_spec.rx, rotation_spec.ry, rotation_spec.rz, final_current))
+                    # Capture full z-trace for hybrid output. Lengths are aligned by run().
+                    z_positions = run_results.get("z_positions", []) or []
+                    currents_full = run_results.get("currents", []) or []
+                    norm_full = run_results.get("normalized_currents", []) or []
+                    block_full = run_results.get("blockages", []) or []
+                    n_z = len(z_positions)
+                    if n_z and n_z == len(currents_full):
+                        # Pad missing optional series with NaN so columns align.
+                        if len(norm_full) != n_z:
+                            norm_full = [float("nan")] * n_z
+                        if len(block_full) != n_z:
+                            block_full = [float("nan")] * n_z
+                        for k in range(n_z):
+                            hybrid_rows.append((
+                                idx,
+                                float(rotation_spec.rx),
+                                float(rotation_spec.ry),
+                                float(rotation_spec.rz),
+                                float(z_positions[k]),
+                                float(currents_full[k]),
+                                float(norm_full[k]),
+                                float(block_full[k]),
+                            ))
             elif args.mode == 'preview_only':
                 if rank == 0:
                     logger.info("Generating preview frames for rotation %s", rotation_spec.label())
@@ -403,6 +429,21 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
             writer.writerows(results)
         logger.info("Rotation scan results saved to %s", results_path)
 
+    if hybrid_rows and rank == 0:
+        hybrid_path = output_dir / "hybrid_currents.csv"
+        with open(hybrid_path, "w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow([
+                "index", "rx", "ry", "rz",
+                "z_A", "current_nA", "normalized_current", "blockage",
+            ])
+            writer.writerows(hybrid_rows)
+        logger.info(
+            "Hybrid (translocation × rotation) trace saved to %s "
+            "(%d rows across %d rotations)",
+            hybrid_path, len(hybrid_rows), len(results),
+        )
+
 def main():
     """
     Main function to run SEM with JSON configuration.
@@ -434,12 +475,42 @@ Pore Types:
     # Run/preview/open_pore commands
     run_parser = subparsers.add_parser('run', help='Run SEM simulation')
     run_parser.add_argument('config', help='Path to JSON configuration file')
+    run_parser.add_argument(
+        '--export-arbd', action='store_true',
+        help='Export ARBD-compatible per-ion potential grids per z step. '
+             'Captures the WITH-ANALYTE steric and electrostatic field. '
+             'Default: only the final z step is exported. Use --arbd-stride '
+             'to also export intermediate steps.')
+    run_parser.add_argument(
+        '--arbd-ions', default='POT:+1,CLA:-1',
+        help='Comma-separated NAME:CHARGE pairs for --export-arbd '
+             '(default: POT:+1,CLA:-1).')
+    run_parser.add_argument(
+        '--arbd-resolution', type=float, default=None,
+        help='Override grid spacing in Å for ARBD export '
+             '(default: SEM mesh spacing).')
+    run_parser.add_argument(
+        '--arbd-stride', type=int, default=0,
+        help='Stride N for per-z ARBD export. 0 (default) means only the '
+             'final z step. N>0 means every Nth step is also exported.')
     
     preview_parser = subparsers.add_parser('preview_only', help='Generate preview plots only')
     preview_parser.add_argument('config', help='Path to JSON configuration file')
     
     open_pore_parser = subparsers.add_parser('open_pore', help='Calculate open pore current only')
     open_pore_parser.add_argument('config', help='Path to JSON configuration file')
+    open_pore_parser.add_argument(
+        '--export-arbd', action='store_true',
+        help='Also export ARBD-compatible per-ion .dx grids '
+             '(steric + open-pore phi combined into kcal/mol potentials).')
+    open_pore_parser.add_argument(
+        '--arbd-ions', default='POT:+1,CLA:-1',
+        help='Comma-separated NAME:CHARGE pairs for --export-arbd '
+             '(default: POT:+1,CLA:-1).')
+    open_pore_parser.add_argument(
+        '--arbd-resolution', type=float, default=None,
+        help='Override grid spacing in Å for ARBD export '
+             '(default: SEM mesh spacing).')
 
     rotation_parser = subparsers.add_parser('rotation_scan', help='Rotate analyte and run SEM for each orientation')
     rotation_parser.add_argument('config', help='Base JSON configuration file')
@@ -579,7 +650,57 @@ Pore Types:
                     
                     logger.info(f"Results saved to: {output_file}")
                     logger.info("Open pore current calculation completed successfully!")
-                
+
+                # Optional ARBD potential-grid export. Triggered by either the
+                # CLI flag (--export-arbd) or by an ``output.arbd_export`` block
+                # in the config JSON. The block, if a dict, may contain:
+                #   ions:           [["POT", +1], ["CLA", -1]]   (or omit → CLI default)
+                #   resolution:     <Å spacing>                   (or omit → mesh spacing)
+                #   prefix:         <output prefix>               (or omit → sem.output_prefix)
+                #   wall_height:    <kcal/mol cap>                (default 100.0)
+                #   temperature_K:  <K>                            (default 295.0)
+                arbd_cfg = config.get("output", {}).get("arbd_export") or {}
+                arbd_requested = bool(getattr(args, "export_arbd", False)) or bool(arbd_cfg)
+                if arbd_requested:
+                    try:
+                        ions_arg = arbd_cfg.get("ions") if isinstance(arbd_cfg, dict) else None
+                        if ions_arg is None:
+                            ions_str = getattr(args, "arbd_ions", "POT:+1,CLA:-1")
+                            ions = []
+                            for token in ions_str.split(','):
+                                token = token.strip()
+                                if not token:
+                                    continue
+                                name, _, q = token.partition(':')
+                                ions.append((name.strip(), float(q)))
+                        else:
+                            ions = [(name, float(q)) for name, q in ions_arg]
+
+                        resolution = (
+                            arbd_cfg.get("resolution")
+                            if isinstance(arbd_cfg, dict)
+                            else None
+                        )
+                        if resolution is None:
+                            resolution = getattr(args, "arbd_resolution", None)
+
+                        from .visualization import export_arbd_grids
+                        export_arbd_grids(
+                            sem,
+                            ions=ions,
+                            custom_resolution=resolution,
+                            output_prefix=arbd_cfg.get("prefix") if isinstance(arbd_cfg, dict) else None,
+                            wall_height_kcal_per_mol=float(arbd_cfg.get("wall_height", 100.0))
+                                if isinstance(arbd_cfg, dict) else 100.0,
+                            temperature_K=float(arbd_cfg.get("temperature_K", 295.0))
+                                if isinstance(arbd_cfg, dict) else 295.0,
+                        )
+                    except Exception as arbd_exc:
+                        if rank == 0:
+                            logger.error(f"ARBD grid export failed: {arbd_exc}")
+                            import traceback
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+
             except Exception as e:
                 if rank == 0:
                     logger.error(f"Error calculating open pore current: {e}")
@@ -632,8 +753,72 @@ Pore Types:
         elif args.command == 'run':
             if rank == 0:
                 logger.info("Running full simulation")
+
+            # Assemble the optional arbd_export dict for run(). The CLI flags
+            # override the config block, but config-block keys fill in
+            # anything the CLI didn't specify. The result is None when no
+            # export was requested at all.
+            arbd_cfg = config.get("output", {}).get("arbd_export") or {}
+            arbd_requested = (
+                bool(getattr(args, "export_arbd", False))
+                or bool(arbd_cfg)
+            )
+            arbd_export_dict = None
+            if arbd_requested:
+                # Resolve ions from config or CLI string
+                ions_arg = arbd_cfg.get("ions") if isinstance(arbd_cfg, dict) else None
+                if ions_arg is None:
+                    ions_str = getattr(args, "arbd_ions", "POT:+1,CLA:-1")
+                    ions_list = []
+                    for token in ions_str.split(','):
+                        token = token.strip()
+                        if not token:
+                            continue
+                        name, _, q = token.partition(':')
+                        ions_list.append((name.strip(), float(q)))
+                else:
+                    ions_list = [(name, float(q)) for name, q in ions_arg]
+
+                resolution = (
+                    arbd_cfg.get("resolution")
+                    if isinstance(arbd_cfg, dict)
+                    else None
+                )
+                if resolution is None:
+                    resolution = getattr(args, "arbd_resolution", None)
+
+                stride = (
+                    arbd_cfg.get("stride")
+                    if isinstance(arbd_cfg, dict)
+                    else None
+                )
+                if stride is None:
+                    stride = getattr(args, "arbd_stride", 0)
+
+                arbd_export_dict = {
+                    "enabled": True,
+                    "ions": ions_list,
+                    "resolution": resolution,
+                    "stride": int(stride or 0),
+                    "wall_height": float(arbd_cfg.get("wall_height", 100.0))
+                        if isinstance(arbd_cfg, dict) else 100.0,
+                    "temperature_K": float(arbd_cfg.get("temperature_K", 295.0))
+                        if isinstance(arbd_cfg, dict) else 295.0,
+                    "output_prefix": (
+                        arbd_cfg.get("prefix")
+                        if isinstance(arbd_cfg, dict) else None
+                    ),
+                }
+                if rank == 0:
+                    logger.info(
+                        "ARBD per-z export enabled: ions=%s, stride=%d, "
+                        "resolution=%s, wall_height=%.1f kcal/mol",
+                        [n for n, _ in ions_list], int(stride or 0),
+                        resolution, arbd_export_dict["wall_height"],
+                    )
+
             # Run full simulation
-            results = sem.run()
+            results = sem.run(arbd_export=arbd_export_dict)
         
         if rank == 0:
             logger.info("Execution completed successfully!")

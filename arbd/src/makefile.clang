@@ -1,0 +1,76 @@
+# CC = g+
+# CC = /usr/local/Cellar/gcc44/4.4.7/bin/g++-4.4
+CC = /usr/bin/clang++
+
+PLATFORM = $(shell uname)
+FINDNVCC = $(shell which nvcc)
+
+#SYSTEM = $(shell $(CC) -dumpmachine) # might be better(?)
+
+ifeq ($(PLATFORM), Linux)
+  CUDAHOME = $(shell readlink -f $(FINDNVCC) | sed 's,/bin/nvcc,,')
+  CUDALIB = $(CUDAHOME)/lib64
+endif
+
+ifeq ($(PLATFORM), Darwin)
+  CUDAHOME = $(shell ./read_link.sh $(FINDNVCC) | sed 's,/bin/nvcc,,')
+  CUDALIB = $(CUDAHOME)/lib
+endif
+
+# if gcc ...
+#OPT = 
+
+# if clang ...
+OPT = -Xcompiler -arch -Xcompiler x86_64
+
+# Either compiler
+#OPT += -gencode arch=compute_10,code=sm_10 -gencode arch=compute_20,code=sm_20 -gencode arch=compute_30,code=sm_30 -gencode arch=compute_35,code=\"sm_35,compute_35\"
+
+
+# Redefine CUDAHOME and/or CUDALIB if necessary 
+#
+# ks.uiuc.edu (Beckman Institute)
+# CUDAHOME = /usr/local/encap/cuda-4.0
+# CUDALIB = $(CUDAHOME)/lib64
+# physics.illinois.edu (Loomis Laboratory)
+# CUDAHOME = /software/cuda-toolkit-5.0-x86_64/cuda
+
+CUDAINC  = $(CUDAHOME)/include
+
+NVCC = $(CUDAHOME)/bin/nvcc
+
+NVCCFLAGS = -ccbin $(CC) -m64 -O3 $(OPT)
+NVCCINC = -I -DUNIX
+
+CCFLAGS = -O3 -Wall -Wno-write-strings -m64 -I$(CUDAINC) -stdlib=libstdc++
+# stdlib is necessary for clang++
+
+LFLAGS = -L$(CUDALIB) -lcurand -lcudart -Wl,-rpath,$(CUDALIB) -I$(CUDAINC)
+
+TARGET = runBrownCUDA
+
+CC_SRC := $(wildcard *.cpp)
+CC_SRC := $(filter-out runBrownTown.cpp, $(CC_SRC))
+CU_SRC := $(wildcard *.cu)
+
+CC_OBJ := $(patsubst %.cpp, %.o, $(CC_SRC))
+CU_OBJ := $(patsubst %.cu, %.o, $(CU_SRC))
+
+# Make EXEC empty to compile
+# Make EXEC @echo to see what would be run otherwise
+EXEC =  @echo 
+
+all: $(TARGET)
+	@echo "Done ->" $(TARGET)
+
+$(TARGET): $(CU_OBJ) $(CC_OBJ) runBrownTown.cpp vmdsock.c imd.c imd.h
+	$(EXEC) $(CC) $(CCFLAGS) $(LFLAGS) runBrownTown.cpp vmdsock.c imd.c $(CU_OBJ) $(CC_OBJ) -o $(TARGET)
+
+$(CU_OBJ): %.o: %.cu %.h
+	$(EXEC) $(NVCC) $(NVCCFLAGS) -c $< -o $@
+	
+$(CC_OBJ): %.o: %.cpp %.h
+	$(EXEC) $(CC) $(CCFLAGS) -c $< -o $@
+	
+clean:
+	rm -f $(TARGET) $(CU_OBJ) $(CC_OBJ)

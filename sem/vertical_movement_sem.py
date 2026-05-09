@@ -331,6 +331,10 @@ class VerticalMovementSEM:
         self._base_moving_positions = None
         self._current_rotation_matrix = np.eye(3)
         self._open_pore_current = None
+        # Store the most recent solved potential field (a dolfinx Function),
+        # so downstream exporters (ARBD potential-grid export, paraview dumps,
+        # etc.) can sample it without re-solving.
+        self._last_uh = None
 
         if self.prepare_analyte:
             if self.rank == 0:
@@ -1076,6 +1080,50 @@ class VerticalMovementSEM:
                 )
             return
 
+        if self.pore_type == "conical":
+            membrane_half_thickness = self.membrane_thickness / 2.0
+            if membrane_half_thickness <= 0:
+                return
+            if self.top_radius is None or self.bottom_radius is None:
+                raise AnalyteOverlapError(
+                    "Conical overlap check requires both top_radius and bottom_radius "
+                    "to be set on the SEM instance."
+                )
+            R = np.sqrt(atom_positions[:, 0] ** 2 + atom_positions[:, 1] ** 2)
+            signed_z = atom_positions[:, 2]
+            abs_z = np.abs(signed_z)
+            # Asymmetric linear interpolation in *signed* z, matching
+            # ConicalPore.get_conductivity_interpolator in pore_geometry.py:
+            #   t = 0 at z = -half_thickness (bottom face)
+            #   t = 1 at z = +half_thickness (top face)
+            thickness = 2.0 * membrane_half_thickness
+            t = np.clip((signed_z + membrane_half_thickness) / thickness, 0.0, 1.0)
+            local_radius = self.bottom_radius + (self.top_radius - self.bottom_radius) * t
+            distances = self._distance_to_membrane(R, abs_z, local_radius, membrane_half_thickness)
+            if fixed_threshold is not None:
+                overlap_mask = distances <= (fixed_threshold + buffer)
+            else:
+                overlap_mask = distances <= (atom_radii + buffer)
+            if np.any(overlap_mask):
+                idx = np.flatnonzero(overlap_mask)[0]
+                bad_point = atom_positions[idx]
+                if fixed_threshold is not None:
+                    raise AnalyteOverlapError(
+                        "Analyte overlaps conical membrane wall: "
+                        f"distance {distances[idx]:.3f} Å <= threshold "
+                        f"{fixed_threshold:.3f} Å + buffer {buffer:.3f} Å at "
+                        f"({bad_point[0]:.2f}, {bad_point[1]:.2f}, {bad_point[2]:.2f}) Å "
+                        f"(local pore radius {local_radius[idx]:.3f} Å)."
+                    )
+                raise AnalyteOverlapError(
+                    "Analyte hard core overlaps conical membrane wall: "
+                    f"distance {distances[idx]:.3f} Å <= radius {atom_radii[idx]:.3f} Å "
+                    f"+ buffer {buffer:.3f} Å at ({bad_point[0]:.2f}, "
+                    f"{bad_point[1]:.2f}, {bad_point[2]:.2f}) Å "
+                    f"(local pore radius {local_radius[idx]:.3f} Å)."
+                )
+            return
+
         if self.pore_type == "biological":
             pore_positions = getattr(self.pore_obj, "pore_positions", None)
             pore_radii = getattr(self.pore_obj, "pore_radii", None)
@@ -1275,7 +1323,9 @@ class VerticalMovementSEM:
             )
             
             uh = problem.solve()
-            
+            # Cache for downstream potential-grid export (ARBD, etc).
+            self._last_uh = uh
+
             if self.rank == 0:
                 logger.info("System solved")
             
@@ -1345,12 +1395,25 @@ class VerticalMovementSEM:
                 logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
-    def run(self, open_current=None):
+    def run(self, open_current=None, arbd_export=None):
         """
         Run the complete vertical movement simulation with robust timing.
-        
+
         Args:
             open_current: Optional precomputed open-pore current to reuse across runs.
+            arbd_export: Optional dict controlling per-z ARBD potential-grid
+                export. Recognised keys (all optional):
+                    enabled       : bool — master switch (default False)
+                    ions          : list of (name, charge) (default POT/CLA)
+                    resolution    : Å spacing override (default mesh)
+                    stride        : int N — export every Nth z step.
+                                    0 means only the final step. Default 0.
+                    wall_height   : kcal/mol cap for steric potential (default 100)
+                    temperature_K : float (default 295)
+                    output_prefix : custom file prefix (default sem.output_prefix)
+                When ``enabled`` is True the with-analyte potential is exported
+                using ``use_current_sigma=True`` so the analyte's exclusion
+                volume is reflected in the steric grid.
 
         Returns:
             results: Dictionary with z_positions, currents, normalized currents, and timing data
@@ -1384,7 +1447,42 @@ class VerticalMovementSEM:
                 logger.info(f"Using cached open pore current: {open_current:.6e} nA")
             else:
                 logger.info(f"Open pore current calculated in {open_pore_time:.2f} seconds: {open_current:.6e} nA")
-        
+
+        # ----- Optional ONE-SHOT no-analyte ARBD export ---------------------
+        # When arbd_export is enabled, write the open-pore (no-analyte) maps
+        # right after calculate_open_pore_current() — at this point sig and
+        # _last_uh both reflect the empty pore. The per-z hook later in the
+        # loop produces the with-analyte snapshots. Net effect: a single
+        # toggle gives both maps.
+        if (
+            arbd_export
+            and arbd_export.get("enabled", False)
+            and self.rank == 0
+            and not reused_open_pore  # avoid duplicating across rotation_scan calls
+        ):
+            try:
+                from .visualization import export_arbd_grids
+                ions_cfg = arbd_export.get("ions", (("POT", +1), ("CLA", -1)))
+                base_prefix = (
+                    arbd_export.get("output_prefix")
+                    or f"{self.output_prefix}_{self.pore_type}"
+                )
+                export_arbd_grids(
+                    self,
+                    ions=ions_cfg,
+                    output_prefix=f"{base_prefix}_openpore",
+                    custom_resolution=arbd_export.get("resolution"),
+                    wall_height_kcal_per_mol=float(
+                        arbd_export.get("wall_height", 100.0)
+                    ),
+                    temperature_K=float(arbd_export.get("temperature_K", 295.0)),
+                    use_current_sigma=False,  # use base interpolator: empty pore
+                )
+            except Exception as arbd_exc:
+                logger.error(
+                    "ARBD open-pore (no-analyte) export failed: %s", arbd_exc
+                )
+
         # Calculate number of steps
         num_steps = int(abs(self.z_end - self.z_start) / self.z_step) + 1
         direction = np.sign(self.z_end - self.z_start)
@@ -1446,6 +1544,54 @@ class VerticalMovementSEM:
                 solver_times.append(solver_time)
                 
                 currents.append(current)
+
+                # ----- Optional per-z ARBD potential-grid export ------------
+                # Captures the *with-analyte* steric + electrostatic field at
+                # this z step. Triggered by passing arbd_export={"enabled":
+                # True, ...} to run(). The σ field on the FEM mesh and
+                # _last_uh both already contain the analyte's effect at this
+                # iteration, so we sample them directly with
+                # use_current_sigma=True and a z-tagged filename prefix.
+                if (
+                    arbd_export
+                    and arbd_export.get("enabled", False)
+                    and self.rank == 0
+                ):
+                    stride = int(arbd_export.get("stride", 0) or 0)
+                    is_last = (i == num_steps - 1)
+                    should_export = (
+                        is_last
+                        or (stride > 0 and (i % stride == 0))
+                    )
+                    if should_export:
+                        try:
+                            from .visualization import export_arbd_grids
+                            ions_cfg = arbd_export.get(
+                                "ions", (("POT", +1), ("CLA", -1))
+                            )
+                            base_prefix = (
+                                arbd_export.get("output_prefix")
+                                or f"{self.output_prefix}_{self.pore_type}"
+                            )
+                            z_tag = f"_z{z_pos:+07.1f}A".replace(" ", "0")
+                            export_arbd_grids(
+                                self,
+                                ions=ions_cfg,
+                                output_prefix=f"{base_prefix}{z_tag}",
+                                custom_resolution=arbd_export.get("resolution"),
+                                wall_height_kcal_per_mol=float(
+                                    arbd_export.get("wall_height", 100.0)
+                                ),
+                                temperature_K=float(
+                                    arbd_export.get("temperature_K", 295.0)
+                                ),
+                                use_current_sigma=True,
+                            )
+                        except Exception as arbd_exc:
+                            logger.error(
+                                "ARBD per-z export failed at Z=%.2f Å: %s",
+                                z_pos, arbd_exc,
+                            )
             except AnalyteOverlapError as overlap_exc:
                 if self.rank == 0:
                     logger.warning(

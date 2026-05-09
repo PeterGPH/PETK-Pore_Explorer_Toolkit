@@ -317,3 +317,224 @@ def export_mesh(sem_instance, filename=None):
         xdmf.write_mesh(sem_instance.mesh)
 
     return filename
+
+
+# Volts → kcal/mol per elementary charge (Faraday in kcal/mol·V·e⁻¹).
+_V_TO_KCAL_PER_MOL_PER_E = 23.0609
+
+
+def _build_uniform_grid(sem_instance, custom_resolution=None):
+    """Return (origin, delta, num_points, X, Y, Z) for the export grid.
+
+    Uses the SEM instance's mesh-domain attributes to size the box. If a
+    ``custom_resolution`` (Å) is supplied, the cell count is recomputed to
+    that spacing; otherwise the SEM mesh resolution is used.
+    """
+    if not (hasattr(sem_instance, "domain_min")
+            and hasattr(sem_instance, "domain_max")
+            and hasattr(sem_instance, "num_cells")):
+        raise RuntimeError(
+            "Mesh domain attributes unavailable; run setup_dolfinx first."
+        )
+
+    if custom_resolution is not None:
+        num_cells = [
+            max(int((sem_instance.domain_max[i] - sem_instance.domain_min[i]) / custom_resolution), 1)
+            for i in range(3)
+        ]
+        delta = [float(custom_resolution)] * 3
+    else:
+        num_cells = list(sem_instance.num_cells)
+        delta = [
+            (sem_instance.domain_max[i] - sem_instance.domain_min[i]) / num_cells[i]
+            for i in range(3)
+        ]
+
+    num_points = [n + 1 for n in num_cells]
+    x_range = np.linspace(sem_instance.domain_min[0], sem_instance.domain_max[0], num_points[0])
+    y_range = np.linspace(sem_instance.domain_min[1], sem_instance.domain_max[1], num_points[1])
+    z_range = np.linspace(sem_instance.domain_min[2], sem_instance.domain_max[2], num_points[2])
+    X, Y, Z = np.meshgrid(x_range, y_range, z_range, indexing='ij')
+    origin = list(sem_instance.domain_min)
+    return origin, delta, num_points, X, Y, Z
+
+
+def _sample_function_on_grid(u_func, grid_coords, comm, fill_value=0.0):
+    """MPI-safe evaluation of a dolfinx Function at arbitrary points.
+
+    Returns a flat array shaped (npts,) with the same value on every rank.
+    Points outside the mesh are filled with ``fill_value``.
+    """
+    from dolfinx.geometry import bb_tree, compute_collisions_points, compute_colliding_cells
+    from mpi4py import MPI
+
+    mesh_obj = u_func.function_space.mesh
+    tree = bb_tree(mesh_obj, mesh_obj.topology.dim)
+
+    cell_candidates = compute_collisions_points(tree, grid_coords)
+    colliding = compute_colliding_cells(mesh_obj, cell_candidates, grid_coords)
+
+    cells_on_proc = []
+    point_indices = []
+    for i in range(grid_coords.shape[0]):
+        links = colliding.links(i)
+        if len(links) > 0:
+            cells_on_proc.append(links[0])
+            point_indices.append(i)
+
+    npts = grid_coords.shape[0]
+    local_values = np.zeros(npts, dtype=np.float64)
+    local_found = np.zeros(npts, dtype=np.int32)
+
+    if point_indices:
+        pts = grid_coords[point_indices]
+        cells = np.asarray(cells_on_proc, dtype=np.int32)
+        evaluated = u_func.eval(pts, cells)
+        if evaluated.ndim > 1:
+            evaluated = evaluated[:, 0]
+        local_values[point_indices] = evaluated
+        local_found[point_indices] = 1
+
+    if comm.size > 1:
+        global_values = np.zeros_like(local_values)
+        global_found = np.zeros_like(local_found)
+        comm.Allreduce(local_values, global_values, op=MPI.SUM)
+        comm.Allreduce(local_found, global_found, op=MPI.SUM)
+    else:
+        global_values = local_values
+        global_found = local_found
+
+    out = np.full(npts, fill_value, dtype=np.float64)
+    mask = global_found > 0
+    out[mask] = global_values[mask] / global_found[mask]
+    return out
+
+
+def export_arbd_grids(
+    sem_instance,
+    ions=(("POT", +1), ("CLA", -1)),
+    *,
+    output_prefix=None,
+    custom_resolution=None,
+    wall_height_kcal_per_mol=100.0,
+    temperature_K=295.0,
+    sigma_floor_frac=1e-30,
+    write_components=True,
+    use_current_sigma=False,
+):
+    """Export ARBD-compatible per-ion potential grids in kcal/mol (OpenDX).
+
+    Combines a steric grid derived from the SEM pore conductivity (no analyte)
+    with the open-pore electrostatic potential and writes one .dx per ion
+    species, suitable for the ``gridFile`` keyword in an ARBD ``BrownDyn.bd``
+    config.
+
+    Args:
+        sem_instance: VerticalMovementSEM instance with ``setup_dolfinx``
+            already run and ``_last_uh`` populated (call
+            ``calculate_open_pore_current()`` first).
+        ions: iterable of ``(name, charge_in_e)`` pairs.
+        output_prefix: filename prefix; defaults to ``<sem.output_prefix>_<sem.pore_type>``.
+        custom_resolution: optional grid spacing in Å (defaults to mesh spacing).
+        wall_height_kcal_per_mol: cap on the steric potential inside walls.
+        temperature_K: temperature for the kT scale of the steric mapping.
+        sigma_floor_frac: minimum σ/σ_bulk before the log-map saturates.
+        write_components: also write ``*_steric.dx`` and ``*_open_pore_phi.dx``
+            for inspection.
+        use_current_sigma: when True, sample the SEM's current dolfinx σ
+            Function (which includes any loaded analyte's exclusion volume)
+            rather than the no-analyte ``base_cond_interp``. Use this from
+            the run loop after each per-z solve to capture the with-analyte
+            potential map. Defaults to False — open-pore behaviour.
+
+    Returns:
+        ``dict`` mapping label → filename for files written (rank 0 only;
+        other ranks return an empty dict).
+    """
+    try:
+        from gridData import Grid
+    except ImportError:
+        logger.error("gridData library not found. Please install with: pip install gridData")
+        return {}
+
+    if sem_instance._last_uh is None:
+        raise RuntimeError(
+            "No open-pore potential available. Call calculate_open_pore_current() "
+            "(or solve_for_current() with the base conductivity loaded) first."
+        )
+
+    if output_prefix is None:
+        output_prefix = f"{sem_instance.output_prefix}_{sem_instance.pore_type}"
+
+    origin, delta, num_points, X, Y, Z = _build_uniform_grid(sem_instance, custom_resolution)
+    nx, ny, nz = num_points
+    grid_coords = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
+
+    # --- Steric component: pick the σ field to sample. -----------------
+    # Default is the no-analyte ``base_cond_interp`` (open-pore steric).
+    # If ``use_current_sigma`` is True, sample the dolfinx Function
+    # ``sem_instance.sig`` directly — this captures whatever was last loaded
+    # into the FEM σ field, including the analyte's exclusion volume after
+    # ``calculate_analyte_conductivity_modification`` runs in a translocation
+    # step. The two paths must produce arrays of the same shape.
+    if use_current_sigma:
+        if not hasattr(sem_instance, "sig") or sem_instance.sig is None:
+            raise RuntimeError(
+                "use_current_sigma=True requires a populated dolfinx σ Function "
+                "on the SEM instance. Call get_conductivity_at_position() first."
+            )
+        sigma_flat = _sample_function_on_grid(
+            sem_instance.sig,
+            grid_coords,
+            sem_instance.comm,
+            fill_value=float(sem_instance.bulk_conductivity),
+        )
+    else:
+        sigma_flat = sem_instance.base_cond_interp(grid_coords)
+    nan_mask = np.isnan(sigma_flat)
+    if np.any(nan_mask):
+        sigma_flat[nan_mask] = sem_instance.bulk_conductivity
+
+    sigma_bulk = float(sem_instance.bulk_conductivity)
+    frac = np.clip(sigma_flat / sigma_bulk, sigma_floor_frac, 1.0)
+    # kT in kcal/mol: R_kcal = 1.987204e-3 kcal/(mol·K)
+    kT_kcal = 1.987204e-3 * temperature_K
+    u_steric_flat = np.clip(-kT_kcal * np.log(frac), 0.0, wall_height_kcal_per_mol)
+    u_steric = u_steric_flat.reshape((nx, ny, nz))
+
+    # --- Electrostatic component from the open-pore Laplace solution ---
+    phi_flat_volts = _sample_function_on_grid(
+        sem_instance._last_uh,
+        grid_coords,
+        sem_instance.comm,
+        fill_value=0.0,
+    )
+    phi = phi_flat_volts.reshape((nx, ny, nz))
+
+    if sem_instance.rank != 0:
+        return {}
+
+    written = {}
+
+    if write_components:
+        steric_path = f"{output_prefix}_steric.dx"
+        Grid(grid=u_steric, delta=delta, origin=origin).export(steric_path)
+        logger.info("Wrote steric grid (kcal/mol): %s", steric_path)
+        written["steric"] = steric_path
+
+        phi_path = f"{output_prefix}_open_pore_phi.dx"
+        Grid(grid=phi, delta=delta, origin=origin).export(phi_path)
+        logger.info("Wrote open-pore phi grid (V): %s", phi_path)
+        written["phi_volts"] = phi_path
+
+    for name, charge in ions:
+        u_total = u_steric + (float(charge) * _V_TO_KCAL_PER_MOL_PER_E) * phi
+        ion_path = f"{output_prefix}_{name}.dx"
+        Grid(grid=u_total, delta=delta, origin=origin).export(ion_path)
+        logger.info(
+            "Wrote ARBD grid for %s (q=%+d, kcal/mol): %s — range [%.2f, %.2f]",
+            name, int(charge), ion_path, float(u_total.min()), float(u_total.max()),
+        )
+        written[name] = ion_path
+
+    return written

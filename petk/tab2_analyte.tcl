@@ -852,6 +852,10 @@ proc ::PETK::gui::loadSelectedCenteredAmino {} {
     }
 
     set ::PETK::gui::analytePDB $path
+    # Library amino acids are pre-centered, so the SEM-ready PDB is the same
+    # file. Sync semAnalytePDB so tab 3 (parameter summary, validation, run
+    # command) sees a populated path without requiring the centering workflow.
+    set ::PETK::gui::semAnalytePDB $path
     if {![info exists ::PETK::gui::analyteSelection] || $::PETK::gui::analyteSelection eq ""} {
         set ::PETK::gui::analyteSelection "all"
     }

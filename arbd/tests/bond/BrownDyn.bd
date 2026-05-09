@@ -1,0 +1,25 @@
+seed 992
+timestep 100e-6
+steps 100000
+
+temperature 295
+outputPeriod 100
+outputEnergyPeriod 10
+outputFormat dcd
+cutoff 100.0
+
+# Potassium
+particle POT
+num 2
+# num 9000
+# gridFile null.dx
+gridFile null2.dx
+diffusionGridFile diffusion.POT.dx
+
+inputCoordinates coord.txt
+
+tabulatedPotential  1
+tabulatedFile 0@0@dummy-pot.dat
+
+tabulatedBondFile dummy-pot.dat
+inputBonds bondfile.txt
