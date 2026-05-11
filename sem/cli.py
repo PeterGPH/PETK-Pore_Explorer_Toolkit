@@ -116,6 +116,17 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
     # Output parameters
     output = config["output"]
     output_prefix = output["output_prefix"]
+    # Optional ARBD-compatible DX export block; passed through to VerticalMovementSEM.
+    arbd_export_cfg = output.get("arbd_export", None)
+    if arbd_export_cfg and rank == 0:
+        ions = arbd_export_cfg.get("ions", [])
+        logger.info(
+            "ARBD export enabled: ions=%s, stride=%s, wall_height=%s kcal/mol, T=%s K",
+            ions,
+            arbd_export_cfg.get("stride", 0),
+            arbd_export_cfg.get("wall_height", 100.0),
+            arbd_export_cfg.get("temperature_K", 295.0),
+        )
     
     # Box dimensions (optional)
     box_dims = config.get("box_dimensions", None)
@@ -181,6 +192,7 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
         overlap_buffer=overlap_buffer,
         overlap_distance_threshold=overlap_distance_threshold,
         bin_file_units=bin_file_units,
+        arbd_export=arbd_export_cfg,
     )
     
     if rank == 0:

@@ -301,7 +301,35 @@ proc ::PETK::gui::buildTab3 {tab3} {
     ttk::button $container.python.testpython -text "Test Python" -command {::PETK::gui::testPythonEnvironment}
 
     grid $container.python.pathlbl $container.python.path $container.python.testpython - -sticky ew -pady 3
-    
+
+    incr row
+    # === ARBD EXPORT SECTION ===
+    ttk::labelframe $container.arbd -text "ARBD Grid Export (optional)" -padding 10
+    grid $container.arbd -row $row -column 0 -sticky ew -padx 10 -pady "5 5"
+    grid columnconfigure $container.arbd {1 3} -weight 1
+    incr row
+
+    ttk::checkbutton $container.arbd.enable \
+        -text "Export phi / per-ion / steric DX grids per step" \
+        -variable ::PETK::gui::semArbdEnabled
+    grid $container.arbd.enable -row 0 -column 0 -columnspan 4 -sticky w -pady "0 4"
+
+    ttk::label $container.arbd.ionslbl -text "Ions (name:valence, comma-separated):" -width 32 -anchor w
+    ttk::entry $container.arbd.ions -textvariable ::PETK::gui::semArbdIons -width 24 -justify left
+    ttk::label $container.arbd.stridelbl -text "Stride (0 = every step):" -width 22 -anchor w
+    ttk::entry $container.arbd.stride -textvariable ::PETK::gui::semArbdStride -width 8 -justify center
+    grid $container.arbd.ionslbl $container.arbd.ions $container.arbd.stridelbl $container.arbd.stride -sticky ew -pady 3 -padx 5
+
+    ttk::label $container.arbd.walllbl -text "Steric wall height (kcal/mol):" -width 32 -anchor w
+    ttk::entry $container.arbd.wall -textvariable ::PETK::gui::semArbdWallHeight -width 12 -justify center
+    ttk::label $container.arbd.templbl -text "Temperature (K):" -width 22 -anchor w
+    ttk::entry $container.arbd.temp -textvariable ::PETK::gui::semArbdTemperature -width 8 -justify center
+    grid $container.arbd.walllbl $container.arbd.wall $container.arbd.templbl $container.arbd.temp -sticky ew -pady 3 -padx 5
+
+    ttk::label $container.arbd.help -anchor w -wraplength 700 \
+        -text "Produces {prefix}_{pore_type}_z{...}_open_pore_phi.dx (volts), one DX per listed ion (kcal/mol), and *_steric.dx, for each solved step. Output goes to the workdir."
+    grid $container.arbd.help -columnspan 4 -sticky w -pady "4 0"
+
     # === PARAMETER SUMMARY SECTION ===
     ttk::labelframe $container.summary -text "Parameter Summary" -padding 10
     grid $container.summary -row $row -column 0 -sticky nsew -padx 10 -pady "5 5"
@@ -528,7 +556,17 @@ proc ::PETK::gui::initializeSEMVariables {} {
     if {![info exists ::PETK::gui::zStep]} {
         set ::PETK::gui::zStep "2.0"
     }
-    
+
+    # ARBD-compatible DX export (phi + per-ion + steric grids).
+    # When semArbdEnabled is 1, outputParametersToConfig emits an "arbd_export"
+    # block under output{} that sem.cli reads and passes to VerticalMovementSEM.
+    # See sem/arbd_export.py for output details.
+    if {![info exists ::PETK::gui::semArbdEnabled]}    { set ::PETK::gui::semArbdEnabled 0 }
+    if {![info exists ::PETK::gui::semArbdIons]}       { set ::PETK::gui::semArbdIons "POT:1, CLA:-1" }
+    if {![info exists ::PETK::gui::semArbdStride]}     { set ::PETK::gui::semArbdStride "0" }
+    if {![info exists ::PETK::gui::semArbdWallHeight]} { set ::PETK::gui::semArbdWallHeight "100.0" }
+    if {![info exists ::PETK::gui::semArbdTemperature]} { set ::PETK::gui::semArbdTemperature "295.0" }
+
     # Python environment
     if {![info exists ::PETK::gui::condaEnvironment]} {
         set ::PETK::gui::condaEnvironment "base"
@@ -1070,6 +1108,11 @@ proc ::PETK::gui::updateSEMParameterSummary {} {
     $widget insert end "  Output Directory: $::PETK::gui::workdir\n"
     $widget insert end "  Output Prefix: $::PETK::gui::outputPrefix\n"
     $widget insert end "  Preview Frames: $::PETK::gui::semPreviewFrames\n"
+    if {[info exists ::PETK::gui::semArbdEnabled] && $::PETK::gui::semArbdEnabled} {
+        $widget insert end "  ARBD Export: ENABLED (ions: $::PETK::gui::semArbdIons, stride: $::PETK::gui::semArbdStride, wall: $::PETK::gui::semArbdWallHeight kcal/mol, T: $::PETK::gui::semArbdTemperature K)\n"
+    } else {
+        $widget insert end "  ARBD Export: disabled\n"
+    }
     
     # Configure text tags for formatting
     $widget tag configure title -font {TkDefaultFont 12 bold}
@@ -2346,7 +2389,49 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
     # Output section
     append json_content "  \"output\": {\n"
     append json_content "    \"output_prefix\": \"$::PETK::gui::outputPrefix\",\n"
-    append json_content "    \"preview_frames\": $::PETK::gui::semPreviewFrames\n"
+
+    # ARBD export block (optional). Emitted only when semArbdEnabled is 1.
+    set arbd_enabled 0
+    if {[info exists ::PETK::gui::semArbdEnabled] && \
+            [string is true -strict $::PETK::gui::semArbdEnabled]} {
+        set arbd_enabled 1
+    } elseif {[info exists ::PETK::gui::semArbdEnabled] && \
+              [string is integer -strict $::PETK::gui::semArbdEnabled] && \
+              $::PETK::gui::semArbdEnabled > 0} {
+        set arbd_enabled 1
+    }
+    if {$arbd_enabled} {
+        # Parse the ions string "POT:1, CLA:-1" into JSON [["POT",1],["CLA",-1]]
+        set ions_json_parts [list]
+        foreach pair [split $::PETK::gui::semArbdIons ","] {
+            set pair [string trim $pair]
+            if {$pair eq ""} continue
+            set kv [split $pair ":"]
+            if {[llength $kv] != 2} continue
+            set name [string trim [lindex $kv 0]]
+            set valence [string trim [lindex $kv 1]]
+            if {$name eq "" || ![string is double -strict $valence]} continue
+            lappend ions_json_parts "\[\"$name\", $valence\]"
+        }
+        set ions_json "\[[join $ions_json_parts ", "]\]"
+
+        set arbd_stride $::PETK::gui::semArbdStride
+        if {![string is integer -strict $arbd_stride]} { set arbd_stride 0 }
+        set arbd_wall $::PETK::gui::semArbdWallHeight
+        if {![string is double -strict $arbd_wall]} { set arbd_wall 100.0 }
+        set arbd_temp $::PETK::gui::semArbdTemperature
+        if {![string is double -strict $arbd_temp]} { set arbd_temp 295.0 }
+
+        append json_content "    \"preview_frames\": $::PETK::gui::semPreviewFrames,\n"
+        append json_content "    \"arbd_export\": {\n"
+        append json_content "      \"ions\": $ions_json,\n"
+        append json_content "      \"stride\": $arbd_stride,\n"
+        append json_content "      \"wall_height\": $arbd_wall,\n"
+        append json_content "      \"temperature_K\": $arbd_temp\n"
+        append json_content "    }\n"
+    } else {
+        append json_content "    \"preview_frames\": $::PETK::gui::semPreviewFrames\n"
+    }
     append json_content "  },\n"
     
     # Box dimensions section

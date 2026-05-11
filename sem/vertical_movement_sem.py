@@ -158,7 +158,8 @@ class VerticalMovementSEM:
                  prevent_analyte_overlap=False,
                  use_radius_overlap_check=False,
                  overlap_buffer=0.0,
-                 overlap_distance_threshold=None):  # Overlap buffer (Å)
+                 overlap_distance_threshold=None,  # Overlap buffer (Å)
+                 arbd_export=None):  # dict from config["output"]["arbd_export"], or None to disable
         
         # Initialize MPI
         self.comm = MPI.COMM_WORLD
@@ -252,6 +253,14 @@ class VerticalMovementSEM:
             if overlap_distance_threshold is not None
             else None
         )
+
+        # ARBD-compatible grid export (volts + per-ion kcal/mol + steric).
+        # ``None`` or empty dict disables export entirely.
+        self.arbd_export_config = arbd_export if isinstance(arbd_export, dict) else None
+        # Set by run() before each solve so solve_for_current can tag DX filenames.
+        # ``None`` => the next solve is the open-pore baseline.
+        self._arbd_current_z = None
+        self._arbd_step_index = 0
 
         # Initialize bin file attributes
         self.bin_dimensions = None
@@ -1326,10 +1335,21 @@ class VerticalMovementSEM:
             )
             
             uh = problem.solve()
-            
+
             if self.rank == 0:
                 logger.info("System solved")
-            
+
+            # ARBD-compatible DX export (phi + per-ion + steric), if enabled.
+            # All ranks call into the helper; only rank 0 writes files.
+            if self.arbd_export_config:
+                try:
+                    from .arbd_export import export_arbd_grids, should_export_at_step
+                    if should_export_at_step(self._arbd_step_index, self.arbd_export_config):
+                        export_arbd_grids(self, uh, self._arbd_current_z, self.arbd_export_config)
+                except Exception as exc:
+                    if self.rank == 0:
+                        logger.warning("ARBD export failed: %s", exc, exc_info=True)
+
             # Calculate flux at boundaries - MATCH FEniCS EXACTLY
             if self.rank == 0:
                 logger.info("Calculating flux at boundaries...")
@@ -1370,7 +1390,7 @@ class VerticalMovementSEM:
         """Calculate baseline current with no analyte in the system."""
         if self.rank == 0:
             logger.info("Calculating open pore current...")
-        
+
         try:
             # Load base conductivity using loadFunc
             if self.rank == 0:
@@ -1378,7 +1398,10 @@ class VerticalMovementSEM:
             loadFunc(self.mesh, self.Q, self.sig, self.base_cond_interp, self.bulk_conductivity)
             if self.rank == 0:
                 logger.info("Base conductivity loaded successfully")
-            
+
+            # Tag the next solve as the open-pore baseline for ARBD export.
+            self._arbd_current_z = None
+
             # Solve for current
             if self.rank == 0:
                 logger.info("Solving for current...")
@@ -1489,7 +1512,11 @@ class VerticalMovementSEM:
                 self.get_conductivity_at_position(z_pos)
                 conductivity_time = time.time() - conductivity_start
                 conductivity_times.append(conductivity_time)
-                
+
+                # Tag this solve with its z-position for ARBD DX filenames.
+                self._arbd_current_z = float(z_pos)
+                self._arbd_step_index = i
+
                 # Time solver
                 solver_start = time.time()
                 current = self.solve_for_current()

@@ -316,6 +316,16 @@ def print_config_summary(config):
         logger.info(f"  Preview Frames: {output.get('preview_frames', 0)}")
         if "preview_mesh" in output:
             logger.info(f"  Preview Mesh: {output['preview_mesh']}")
+        if "arbd_export" in output and output["arbd_export"]:
+            arbd = output["arbd_export"]
+            ions = arbd.get("ions", [])
+            logger.info(
+                "  ARBD export: ions=%s, stride=%s, wall=%s kcal/mol, T=%s K",
+                ions,
+                arbd.get("stride", 0),
+                arbd.get("wall_height", 100.0),
+                arbd.get("temperature_K", 295.0),
+            )
 
 def create_example_config(pore_type="cylindrical", output_file="example_config.json"):
     """
