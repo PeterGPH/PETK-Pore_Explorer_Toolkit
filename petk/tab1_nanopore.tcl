@@ -231,8 +231,10 @@ proc ::PETK::gui::buildTab1 {tab1} {
         -variable ::PETK::gui::membraneType -command {::PETK::gui::updateMembraneTypeDisplay}
     ttk::radiobutton $container.poretype.doublecone -text "Double Cone Pore" -value "doublecone" \
         -variable ::PETK::gui::membraneType -command {::PETK::gui::updateMembraneTypeDisplay}
+    ttk::radiobutton $container.poretype.conical -text "Conical Pore" -value "conical" \
+        -variable ::PETK::gui::membraneType -command {::PETK::gui::updateMembraneTypeDisplay}
 
-    grid $container.poretype.cylindrical $container.poretype.doublecone -sticky w -pady 3 -padx 20
+    grid $container.poretype.cylindrical $container.poretype.doublecone $container.poretype.conical -sticky w -pady 3 -padx 20
 
     # === PORE PARAMETERS SECTION (only for solid-state) ===
     ttk::labelframe $container.params -text "Pore Parameters" -padding 10
@@ -262,6 +264,15 @@ proc ::PETK::gui::buildTab1 {tab1} {
     ttk::entry $container.params.cone.outer -textvariable ::PETK::gui::outerDiameter -width 12 -justify center
 
     grid $container.params.cone.innerlbl $container.params.cone.inner $container.params.cone.outerlbl $container.params.cone.outer -sticky ew -pady 3 -padx 5
+
+    # Conical (single truncated cone / frustum) pore parameters
+    ttk::frame $container.params.conical
+    ttk::label $container.params.conical.toplbl -text "Top diameter (Å):" -width 20
+    ttk::entry $container.params.conical.top -textvariable ::PETK::gui::topDiameter -width 12 -justify center
+    ttk::label $container.params.conical.botlbl -text "Bottom diameter (Å):" -width 18
+    ttk::entry $container.params.conical.bot -textvariable ::PETK::gui::bottomDiameter -width 12 -justify center
+
+    grid $container.params.conical.toplbl $container.params.conical.top $container.params.conical.botlbl $container.params.conical.bot -sticky ew -pady 3 -padx 5
 
     # === VISUALIZATION SECTION ===
     ttk::labelframe $container.visualization -text "Pore Geometry Visualization" -padding 10
@@ -408,6 +419,14 @@ proc ::PETK::gui::initializeMembraneVariables {} {
     if {![info exists ::PETK::gui::outerDiameter]} {
         set ::PETK::gui::outerDiameter "300.0"
     }
+
+    # Initialize conical (single frustum) parameters
+    if {![info exists ::PETK::gui::topDiameter]} {
+        set ::PETK::gui::topDiameter "240.0"
+    }
+    if {![info exists ::PETK::gui::bottomDiameter]} {
+        set ::PETK::gui::bottomDiameter "120.0"
+    }
     
     # Initialize common parameters
     if {![info exists ::PETK::gui::nanoporeThickness]} {
@@ -450,11 +469,23 @@ proc ::PETK::gui::initializeMembraneVariables {} {
         innerDiameter "100.0" \
         outerDiameter "300.0"]
 
+    set ::PETK::gui::solidStateDefaults(conical) [dict create \
+        autoCalculateBox 0 \
+        boxSizeX "300.0" \
+        boxSizeY "300.0" \
+        boxSizeZ "300.0" \
+        nanoporeThickness "200.0" \
+        topDiameter "240.0" \
+        bottomDiameter "120.0"]
+
     if {![info exists ::PETK::gui::solidStateState(cylindrical)]} {
         set ::PETK::gui::solidStateState(cylindrical) ""
     }
     if {![info exists ::PETK::gui::solidStateState(doublecone)]} {
         set ::PETK::gui::solidStateState(doublecone) ""
+    }
+    if {![info exists ::PETK::gui::solidStateState(conical)]} {
+        set ::PETK::gui::solidStateState(conical) ""
     }
     if {![info exists ::PETK::gui::previousMembraneType]} {
         set ::PETK::gui::previousMembraneType $::PETK::gui::membraneType
@@ -550,7 +581,7 @@ proc ::PETK::gui::transitionToPoreOption {new_option} {
     set preset_type ""
     if {$old_option eq "biological" && $new_option eq "solid-state"} {
         set apply_preset 1
-        if {![info exists ::PETK::gui::membraneType] || $::PETK::gui::membraneType eq "" || $::PETK::gui::membraneType ni {cylindrical doublecone}} {
+        if {![info exists ::PETK::gui::membraneType] || $::PETK::gui::membraneType eq "" || $::PETK::gui::membraneType ni {cylindrical doublecone conical}} {
             set ::PETK::gui::membraneType "cylindrical"
         }
         set preset_type $::PETK::gui::membraneType
@@ -764,8 +795,19 @@ proc ::PETK::gui::calculateBoxDimensions {} {
         if {[string is double $::PETK::gui::outerDiameter]} {
             set pore_radius [expr {$::PETK::gui::outerDiameter / 2.0}]
         }
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        # Use the larger of top/bottom diameter as the bounding radius
+        set top_d 0.0
+        set bot_d 0.0
+        if {[string is double $::PETK::gui::topDiameter]} {
+            set top_d [expr {$::PETK::gui::topDiameter}]
+        }
+        if {[string is double $::PETK::gui::bottomDiameter]} {
+            set bot_d [expr {$::PETK::gui::bottomDiameter}]
+        }
+        set pore_radius [expr {max($top_d, $bot_d) / 2.0}]
     }
-    
+
     # Calculate XY dimensions based on pore size and padding
     set padding $::PETK::gui::sysPadding
     set xy_size [expr {max(0.0, $pore_radius + 50.0 + $padding)}]
@@ -1090,7 +1132,7 @@ proc ::PETK::gui::updateMembraneTypeDisplay {} {
     
     if {$::PETK::gui::poreOption eq "solid-state"} {
         set new_type $::PETK::gui::membraneType
-        if {$new_type eq "" || $new_type ni {cylindrical doublecone}} {
+        if {$new_type eq "" || $new_type ni {cylindrical doublecone conical}} {
             set new_type "cylindrical"
             set ::PETK::gui::membraneType $new_type
         }
@@ -1110,7 +1152,8 @@ proc ::PETK::gui::updateMembraneTypeDisplay {} {
     # Hide all parameter frames first
     catch {grid forget $container.params.cyl}
     catch {grid forget $container.params.cone}
-    
+    catch {grid forget $container.params.conical}
+
     if {$::PETK::gui::membraneType eq "cylindrical"} {
         grid $container.params.cyl -row 1 -column 0 -columnspan 6 -sticky ew -pady 5
         set ::PETK::gui::currentPoreType "Cylindrical"
@@ -1119,6 +1162,10 @@ proc ::PETK::gui::updateMembraneTypeDisplay {} {
         grid $container.params.cone -row 1 -column 0 -columnspan 6 -sticky ew -pady 5
         set ::PETK::gui::currentPoreType "Double Cone"
         ::PETK::gui::updateMembraneStatus "Switched to double cone pore mode"
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        grid $container.params.conical -row 1 -column 0 -columnspan 6 -sticky ew -pady 5
+        set ::PETK::gui::currentPoreType "Conical"
+        ::PETK::gui::updateMembraneStatus "Switched to conical (frustum) pore mode"
     }
     
     # FIX: Force canvas and content refresh
@@ -1195,7 +1242,7 @@ proc ::PETK::gui::updateParameterDisplay {} {
     } elseif {$::PETK::gui::membraneType eq "doublecone"} {
         set ::PETK::gui::displayParam1 "Inner: $::PETK::gui::innerDiameter Å"
         set ::PETK::gui::displayParam2 "Outer: $::PETK::gui::outerDiameter Å"
-        
+
         # Calculate double cone volume (approximation)
         if {[string is double $::PETK::gui::innerDiameter] && [string is double $::PETK::gui::outerDiameter] && [string is double $::PETK::gui::nanoporeThickness]} {
             set r1 [expr {$::PETK::gui::innerDiameter / 2.0}]
@@ -1203,6 +1250,21 @@ proc ::PETK::gui::updateParameterDisplay {} {
             set h [expr {$::PETK::gui::nanoporeThickness / 2.0}]
             # Volume of truncated cone: π/3 * h * (r1² + r1*r2 + r2²)
             set volume [expr {3.14159/3.0 * $h * ($r1*$r1 + $r1*$r2 + $r2*$r2) * 2}]
+            set ::PETK::gui::calculatedVolume [format "%.1f Å³" $volume]
+        } else {
+            set ::PETK::gui::calculatedVolume "Invalid params"
+        }
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        set ::PETK::gui::displayParam1 "Top: $::PETK::gui::topDiameter Å"
+        set ::PETK::gui::displayParam2 "Bottom: $::PETK::gui::bottomDiameter Å"
+
+        # Volume of a single truncated cone (frustum):
+        # V = π/3 * h * (r_top² + r_top*r_bot + r_bot²)
+        if {[string is double $::PETK::gui::topDiameter] && [string is double $::PETK::gui::bottomDiameter] && [string is double $::PETK::gui::nanoporeThickness]} {
+            set rt [expr {$::PETK::gui::topDiameter / 2.0}]
+            set rb [expr {$::PETK::gui::bottomDiameter / 2.0}]
+            set h $::PETK::gui::nanoporeThickness
+            set volume [expr {3.14159/3.0 * $h * ($rt*$rt + $rt*$rb + $rb*$rb)}]
             set ::PETK::gui::calculatedVolume [format "%.1f Å³" $volume]
         } else {
             set ::PETK::gui::calculatedVolume "Invalid params"
@@ -1222,7 +1284,8 @@ proc ::PETK::gui::loadPoreImages {} {
     ::PETK::gui::clearScaledImageCache
     set ::PETK::gui::poreImages(cylindrical) ""
     set ::PETK::gui::poreImages(doublecone) ""
-    
+    set ::PETK::gui::poreImages(conical) ""
+
     set cyl_path [::PETK::gui::resourcePath shapes shape2.gif]
     if {[file exists $cyl_path]} {
         if {[catch {
@@ -1233,7 +1296,7 @@ proc ::PETK::gui::loadPoreImages {} {
     } else {
         puts "Warning: Cylindrical pore image not found at: $cyl_path"
     }
-    
+
     set cone_path [::PETK::gui::resourcePath shapes shape1.gif]
     if {[file exists $cone_path]} {
         if {[catch {
@@ -1243,6 +1306,17 @@ proc ::PETK::gui::loadPoreImages {} {
         }
     } else {
         puts "Warning: Double cone pore image not found at: $cone_path"
+    }
+
+    set conical_path [::PETK::gui::resourcePath shapes shape3.gif]
+    if {[file exists $conical_path]} {
+        if {[catch {
+            set ::PETK::gui::poreImages(conical) [image create photo -file $conical_path]
+        } error]} {
+            puts "Warning: Could not load conical pore image: $error"
+        }
+    } else {
+        puts "Warning: Conical pore image not found at: $conical_path"
     }
 }
 
@@ -1464,6 +1538,42 @@ proc ::PETK::gui::resamplePhoto {image target_width target_height} {
         return $image
     }
 
+    # FAST PRE-SHRINK ----------------------------------------------------
+    # The high-quality box-filter loop below is pure interpreted Tcl,
+    # ~O(target_pixels × source_pixels_per_target). For a 4739×2502
+    # source going to 300×250 that's tens of millions of ``image get``
+    # calls — multiple seconds.
+    #
+    # Tk's native ``image copy -subsample sx sy`` is a C-level point
+    # sampler that runs in microseconds. Use it to shrink the source to
+    # at most ~2× the target in each axis (separately, so aspect is
+    # preserved) before running the high-quality averager. Visually the
+    # final result is still box-filtered — the prefilter just reduces
+    # the number of source pixels the averager has to read.
+    #
+    # We keep prefilter_owned so we can ``image delete`` it after use
+    # and avoid leaking photo handles per redraw.
+    set prefilter_owned ""
+    set sub_x [expr {max(1, int(floor(double($src_w) / (2 * $target_width))))}]
+    set sub_y [expr {max(1, int(floor(double($src_h) / (2 * $target_height))))}]
+    if {$sub_x > 1 || $sub_y > 1} {
+        set prefilter [image create photo]
+        if {[catch {
+            $prefilter copy $image -subsample $sub_x $sub_y
+        } err]} {
+            # If -subsample fails for any reason, fall back to the
+            # original source — correctness over speed.
+            image delete $prefilter
+            set prefilter ""
+        }
+        if {$prefilter ne ""} {
+            set image $prefilter
+            set prefilter_owned $prefilter
+            set src_w [image width $image]
+            set src_h [image height $image]
+        }
+    }
+
     set scaled [image create photo -width $target_width -height $target_height]
     set max_channel [::PETK::gui::getPhotoColorDepth $image]
     set white_value $max_channel
@@ -1561,6 +1671,12 @@ proc ::PETK::gui::resamplePhoto {image target_width target_height} {
             lappend row_colors $color
         }
         $scaled put [list $row_colors] -to 0 $dy
+    }
+
+    # Free the temporary prefilter image (if we created one) before
+    # returning. The cache layer above us only retains $scaled.
+    if {$prefilter_owned ne ""} {
+        catch {image delete $prefilter_owned}
     }
 
     return $scaled
@@ -1711,7 +1827,7 @@ proc ::PETK::gui::drawPoreSchematic {canvas} {
         # Membrane (gray rectangles)
         $canvas create rectangle 20 [expr {$cy-40}] [expr {$cx-40}] [expr {$cy+40}] -fill gray70 -outline black
         $canvas create rectangle [expr {$cx+40}] [expr {$cy-40}] [expr {$width-20}] [expr {$cy+40}] -fill gray70 -outline black
-        
+
         # Double cone pore (trapezoid)
         set coords [list [expr {$cx-40}] [expr {$cy-40}] \
                          [expr {$cx-15}] $cy \
@@ -1720,9 +1836,43 @@ proc ::PETK::gui::drawPoreSchematic {canvas} {
                          [expr {$cx+15}] $cy \
                          [expr {$cx+40}] [expr {$cy-40}]]
         $canvas create polygon $coords -fill white -outline black
-        
+
         # Labels
         $canvas create text $cx [expr {$cy-60}] -text "Double Cone Pore" -font {TkDefaultFont 10 bold}
+        $canvas create text 60 [expr {$cy-60}] -text "Membrane" -font {TkDefaultFont 9}
+
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        # Draw conical (single frustum) pore schematic.
+        # Top edge has half-width derived from topDiameter, bottom from bottomDiameter.
+        set max_half 40
+        set top_d 0.0
+        set bot_d 0.0
+        if {[string is double $::PETK::gui::topDiameter]} {
+            set top_d [expr {$::PETK::gui::topDiameter}]
+        }
+        if {[string is double $::PETK::gui::bottomDiameter]} {
+            set bot_d [expr {$::PETK::gui::bottomDiameter}]
+        }
+        set max_d [expr {max($top_d, $bot_d, 1.0)}]
+        set top_half [expr {int($max_half * $top_d / $max_d)}]
+        set bot_half [expr {int($max_half * $bot_d / $max_d)}]
+        if {$top_half < 6} { set top_half 6 }
+        if {$bot_half < 6} { set bot_half 6 }
+
+        # Membrane (gray rectangles flanking the pore)
+        set max_pore_half [expr {max($top_half, $bot_half)}]
+        $canvas create rectangle 20 [expr {$cy-40}] [expr {$cx-$max_pore_half}] [expr {$cy+40}] -fill gray70 -outline black
+        $canvas create rectangle [expr {$cx+$max_pore_half}] [expr {$cy-40}] [expr {$width-20}] [expr {$cy+40}] -fill gray70 -outline black
+
+        # Frustum (trapezoid): top-edge at cy-40, bottom-edge at cy+40
+        set coords [list [expr {$cx-$top_half}] [expr {$cy-40}] \
+                         [expr {$cx+$top_half}] [expr {$cy-40}] \
+                         [expr {$cx+$bot_half}] [expr {$cy+40}] \
+                         [expr {$cx-$bot_half}] [expr {$cy+40}]]
+        $canvas create polygon $coords -fill white -outline black
+
+        # Labels
+        $canvas create text $cx [expr {$cy-60}] -text "Conical Pore" -font {TkDefaultFont 10 bold}
         $canvas create text 60 [expr {$cy-60}] -text "Membrane" -font {TkDefaultFont 9}
     }
 }
@@ -1741,6 +1891,10 @@ proc ::PETK::gui::addParameterLabels {canvas} {
     } elseif {$::PETK::gui::membraneType eq "doublecone"} {
         $canvas create text [expr {$width-10}] 20 -text "Inner = $::PETK::gui::innerDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
         $canvas create text [expr {$width-10}] 35 -text "Outer = $::PETK::gui::outerDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+        $canvas create text [expr {$width-10}] 50 -text "T = $::PETK::gui::nanoporeThickness Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        $canvas create text [expr {$width-10}] 20 -text "Top = $::PETK::gui::topDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
+        $canvas create text [expr {$width-10}] 35 -text "Bottom = $::PETK::gui::bottomDiameter Å" -anchor ne -font {TkDefaultFont 9} -fill blue
         $canvas create text [expr {$width-10}] 50 -text "T = $::PETK::gui::nanoporeThickness Å" -anchor ne -font {TkDefaultFont 9} -fill blue
     }
 }
@@ -2125,7 +2279,7 @@ proc ::PETK::gui::persistSolidStateParameters {{targetType ""}} {
         set targetType $::PETK::gui::membraneType
     }
     
-    if {$targetType ni {cylindrical doublecone}} {
+    if {$targetType ni {cylindrical doublecone conical}} {
         return
     }
     
@@ -2143,9 +2297,12 @@ proc ::PETK::gui::persistSolidStateParameters {{targetType ""}} {
     if {$targetType eq "cylindrical"} {
         dict set state cylindricalDiameter $::PETK::gui::cylindricalDiameter
         dict set state cornerRadius $::PETK::gui::cornerRadius
-    } else {
+    } elseif {$targetType eq "doublecone"} {
         dict set state innerDiameter $::PETK::gui::innerDiameter
         dict set state outerDiameter $::PETK::gui::outerDiameter
+    } elseif {$targetType eq "conical"} {
+        dict set state topDiameter $::PETK::gui::topDiameter
+        dict set state bottomDiameter $::PETK::gui::bottomDiameter
     }
     
     set ::PETK::gui::solidStateState($targetType) $state
@@ -2162,7 +2319,7 @@ proc ::PETK::gui::applySolidStatePreset {{profile_type ""} {useDefaults 0}} {
         }
     }
     
-    if {$profile_type ni {cylindrical doublecone}} {
+    if {$profile_type ni {cylindrical doublecone conical}} {
         puts "Warning: Unknown solid-state pore type '$profile_type' - falling back to cylindrical defaults"
         set profile_type "cylindrical"
     }
@@ -2216,6 +2373,17 @@ proc ::PETK::gui::applySolidStatePreset {{profile_type ""} {useDefaults 0}} {
             set ::PETK::gui::cornerRadius [dict get $source cornerRadius]
         } else {
             set ::PETK::gui::cornerRadius [dict get $defaults cornerRadius]
+        }
+    } elseif {$profile_type eq "conical"} {
+        if {[dict exists $source topDiameter]} {
+            set ::PETK::gui::topDiameter [dict get $source topDiameter]
+        } else {
+            set ::PETK::gui::topDiameter [dict get $defaults topDiameter]
+        }
+        if {[dict exists $source bottomDiameter]} {
+            set ::PETK::gui::bottomDiameter [dict get $source bottomDiameter]
+        } else {
+            set ::PETK::gui::bottomDiameter [dict get $defaults bottomDiameter]
         }
     } else {
         if {[dict exists $source innerDiameter]} {
@@ -2829,7 +2997,7 @@ proc ::PETK::gui::updateAutoBoxDisplayFromDimensions {box_x box_y box_z {min_z "
         set ::PETK::gui::membraneType "cylindrical"
     }
 
-    if {$::PETK::gui::poreOption eq "solid-state" && $::PETK::gui::membraneType in {"cylindrical" "doublecone"}} {
+    if {$::PETK::gui::poreOption eq "solid-state" && $::PETK::gui::membraneType in {"cylindrical" "doublecone" "conical"}} {
         set lateral_size [expr {max($box_x, $box_y)}]
         set bulk_height [expr {$box_z}]
         set thickness 0.0
@@ -3857,25 +4025,107 @@ proc ::PETK::gui::drawSolidStatePore {min_x max_x min_y max_y min_z max_z xbox y
         for {set angle 0} {$angle < 360} {incr angle 20} {
             set angle_rad [expr $angle * 3.14159 / 180.0]
             set next_angle_rad [expr ($angle + 20) * 3.14159 / 180.0]
-            
+
             # Outer radius points
             set x1_out [expr $outer_radius * cos($angle_rad)]
             set y1_out [expr $outer_radius * sin($angle_rad)]
             set x2_out [expr $outer_radius * cos($next_angle_rad)]
             set y2_out [expr $outer_radius * sin($next_angle_rad)]
-            
-            # Inner radius points  
+
+            # Inner radius points
             set x1_in [expr $inner_radius * cos($angle_rad)]
             set y1_in [expr $inner_radius * sin($angle_rad)]
             set x2_in [expr $inner_radius * cos($next_angle_rad)]
             set y2_in [expr $inner_radius * sin($next_angle_rad)]
-            
+
             # Draw cone outline
             draw line [list $x1_out $y1_out $pore_start_z] [list $x2_out $y2_out $pore_start_z] width 4
             draw line [list $x1_in $y1_in $middle_z] [list $x2_in $y2_in $middle_z] width 4
             draw line [list $x1_out $y1_out $pore_start_z] [list $x1_in $y1_in $middle_z] width 4
             draw line [list $x1_in $y1_in $middle_z] [list $x1_out $y1_out $pore_end_z] width 4
             draw line [list $x1_out $y1_out $pore_end_z] [list $x2_out $y2_out $pore_end_z] width 4
+        }
+
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        # Draw membrane with single truncated-cone (frustum) hole.
+        # top_radius is at z = pore_end_z (+half_thickness),
+        # bottom_radius is at z = pore_start_z (-half_thickness).
+        set top_radius [expr $::PETK::gui::topDiameter / 2.0]
+        set bottom_radius [expr $::PETK::gui::bottomDiameter / 2.0]
+        set max_radius [expr {max($top_radius, $bottom_radius)}]
+
+        # Add visual warning if configuration is invalid
+        if {[string match "*INVALID*" $::PETK::gui::poreValidityStatus]} {
+            draw color red
+            draw material Transparent
+            set warn_radius [expr $max_radius + 10.0]
+
+            for {set angle 0} {$angle < 360} {incr angle 30} {
+                set angle_rad [expr $angle * 3.14159 / 180.0]
+                set next_angle_rad [expr ($angle + 30) * 3.14159 / 180.0]
+                set x1 [expr $warn_radius * cos($angle_rad)]
+                set y1 [expr $warn_radius * sin($angle_rad)]
+                set x2 [expr $warn_radius * cos($next_angle_rad)]
+                set y2 [expr $warn_radius * sin($next_angle_rad)]
+
+                draw line [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z] width 4
+                draw line [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z] width 4
+            }
+
+            draw color purple
+            draw material Opaque
+        }
+
+        # Draw membrane as rectangular sheets with a frustum hole.
+        # On the bottom face (z = pore_start_z) the hole has radius bottom_radius.
+        # On the top face (z = pore_end_z) the hole has radius top_radius.
+        set grid_size 5.0
+        for {set x $min_x} {$x < $max_x} {set x [expr $x + $grid_size]} {
+            for {set y $min_y} {$y < $max_y} {set y [expr $y + $grid_size]} {
+                set x1 $x
+                set x2 [expr min($x + $grid_size, $max_x)]
+                set y1 $y
+                set y2 [expr min($y + $grid_size, $max_y)]
+
+                set cx [expr ($x1 + $x2) / 2.0]
+                set cy [expr ($y1 + $y2) / 2.0]
+                set distance [expr sqrt($cx*$cx + $cy*$cy)]
+
+                # Bottom face — hole has radius bottom_radius
+                if {$distance > $bottom_radius} {
+                    draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z]
+                    draw triangle [list $x1 $y1 $pore_start_z] [list $x2 $y2 $pore_start_z] [list $x1 $y2 $pore_start_z]
+                }
+
+                # Top face — hole has radius top_radius
+                if {$distance > $top_radius} {
+                    draw triangle [list $x1 $y1 $pore_end_z] [list $x2 $y2 $pore_end_z] [list $x2 $y1 $pore_end_z]
+                    draw triangle [list $x1 $y1 $pore_end_z] [list $x1 $y2 $pore_end_z] [list $x2 $y2 $pore_end_z]
+                }
+            }
+        }
+
+        # Draw the frustum outline in yellow.
+        draw color yellow
+        set angle_step 20
+        for {set angle 0} {$angle < 360} {incr angle $angle_step} {
+            set angle_rad [expr $angle * 3.14159 / 180.0]
+            set next_angle_rad [expr ($angle + $angle_step) * 3.14159 / 180.0]
+
+            set xt1 [expr $top_radius * cos($angle_rad)]
+            set yt1 [expr $top_radius * sin($angle_rad)]
+            set xt2 [expr $top_radius * cos($next_angle_rad)]
+            set yt2 [expr $top_radius * sin($next_angle_rad)]
+
+            set xb1 [expr $bottom_radius * cos($angle_rad)]
+            set yb1 [expr $bottom_radius * sin($angle_rad)]
+            set xb2 [expr $bottom_radius * cos($next_angle_rad)]
+            set yb2 [expr $bottom_radius * sin($next_angle_rad)]
+
+            # Top circle (at +half), bottom circle (at -half), and the slanted wall.
+            draw line [list $xt1 $yt1 $pore_end_z]   [list $xt2 $yt2 $pore_end_z]   width 4
+            draw line [list $xb1 $yb1 $pore_start_z] [list $xb2 $yb2 $pore_start_z] width 4
+            draw line [list $xb1 $yb1 $pore_start_z] [list $xt1 $yt1 $pore_end_z]   width 4
         }
     }
     
@@ -3910,13 +4160,13 @@ proc ::PETK::gui::updatePoreDiameter {} {
         
     } elseif {$::PETK::gui::membraneType eq "doublecone"} {
         # For double cone pores, use the smaller of inner and outer diameters
-        if {[info exists ::PETK::gui::innerDiameter] && 
+        if {[info exists ::PETK::gui::innerDiameter] &&
             [info exists ::PETK::gui::outerDiameter] &&
-            [string is double $::PETK::gui::innerDiameter] && 
+            [string is double $::PETK::gui::innerDiameter] &&
             [string is double $::PETK::gui::outerDiameter] &&
-            $::PETK::gui::innerDiameter > 0 && 
+            $::PETK::gui::innerDiameter > 0 &&
             $::PETK::gui::outerDiameter > 0} {
-            
+
             # Set to the minimum of inner and outer diameters
             if {$::PETK::gui::innerDiameter <= $::PETK::gui::outerDiameter} {
                 set ::PETK::gui::poreDiameter $::PETK::gui::innerDiameter
@@ -3929,7 +4179,29 @@ proc ::PETK::gui::updatePoreDiameter {} {
             set ::PETK::gui::poreDiameter ""
             puts "Warning: Invalid or missing inner/outer diameters"
         }
-        
+
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        # For conical (single frustum) pores use the smaller of top/bottom
+        # — this is the constriction the analyte must clear.
+        if {[info exists ::PETK::gui::topDiameter] &&
+            [info exists ::PETK::gui::bottomDiameter] &&
+            [string is double $::PETK::gui::topDiameter] &&
+            [string is double $::PETK::gui::bottomDiameter] &&
+            $::PETK::gui::topDiameter > 0 &&
+            $::PETK::gui::bottomDiameter > 0} {
+
+            if {$::PETK::gui::topDiameter <= $::PETK::gui::bottomDiameter} {
+                set ::PETK::gui::poreDiameter $::PETK::gui::topDiameter
+                puts "Pore diameter set to top diameter (smaller): $::PETK::gui::poreDiameter Å"
+            } else {
+                set ::PETK::gui::poreDiameter $::PETK::gui::bottomDiameter
+                puts "Pore diameter set to bottom diameter (smaller): $::PETK::gui::poreDiameter Å"
+            }
+        } else {
+            set ::PETK::gui::poreDiameter ""
+            puts "Warning: Invalid or missing top/bottom diameters"
+        }
+
     } else {
         # Unknown membrane type
         set ::PETK::gui::poreDiameter ""
@@ -4012,7 +4284,7 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
     } elseif {$::PETK::gui::membraneType eq "doublecone"} {
         set inner_radius [expr $::PETK::gui::innerDiameter / 2.0]
         set outer_radius [expr $::PETK::gui::outerDiameter / 2.0]
-        
+
         # Check inner radius
         if {$inner_radius > $min_box_half_xy} {
             set is_valid 0
@@ -4020,7 +4292,7 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
             lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
             lappend critical_errors "  Required: inner radius < $min_box_half_xy Å"
         }
-        
+
         # Check outer radius (more critical)
         if {$outer_radius > $min_box_half_xy} {
             set is_valid 0
@@ -4031,7 +4303,23 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
             lappend warnings "Outer radius ($outer_radius Å) > 80% of minimum box half-dimension"
             lappend warnings "  Consider increasing box size for better simulation quality"
         }
-        
+
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        set top_radius [expr $::PETK::gui::topDiameter / 2.0]
+        set bottom_radius [expr $::PETK::gui::bottomDiameter / 2.0]
+        set max_radius [expr {max($top_radius, $bottom_radius)}]
+
+        # The widest mouth is what matters for box-fit
+        if {$max_radius > $min_box_half_xy} {
+            set is_valid 0
+            lappend critical_errors "Max pore radius ($max_radius Å) > minimum box half-dimension ($min_box_half_xy Å)"
+            lappend critical_errors "  Box half-dimensions: X=$box_half_x Å, Y=$box_half_y Å"
+            lappend critical_errors "  Required: max(top, bottom) radius < $min_box_half_xy Å"
+        } elseif {$max_radius > [expr 0.8 * $min_box_half_xy]} {
+            lappend warnings "Max pore radius ($max_radius Å) > 80% of minimum box half-dimension"
+            lappend warnings "  Consider increasing box size for better simulation quality"
+        }
+
     }
     
     # 3. ADDITIONAL GEOMETRIC VALIDATIONS
@@ -4058,6 +4346,12 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
                 lappend warnings "Limited space around pore: only $available_space Å"
                 lappend warnings "  Recommended minimum: $min_spacing Å for proper solvation"
             }
+        } elseif {$::PETK::gui::membraneType eq "conical"} {
+            set available_space [expr $min_box_half_xy - $max_radius]
+            if {$available_space < $min_spacing} {
+                lappend warnings "Limited space around pore: only $available_space Å"
+                lappend warnings "  Recommended minimum: $min_spacing Å for proper solvation"
+            }
         }
     }
     
@@ -4072,9 +4366,12 @@ proc ::PETK::gui::validatePoreConfiguration {xbox ybox zbox} {
         if {[info exists ::PETK::gui::cornerRadius] && $::PETK::gui::cornerRadius > 0} {
             append detailed_message "Corner radius: $::PETK::gui::cornerRadius Å\n"
         }
-    } else {
+    } elseif {$::PETK::gui::membraneType eq "doublecone"} {
         append detailed_message "Inner diameter: $::PETK::gui::innerDiameter Å\n"
         append detailed_message "Outer diameter: $::PETK::gui::outerDiameter Å\n"
+    } elseif {$::PETK::gui::membraneType eq "conical"} {
+        append detailed_message "Top diameter: $::PETK::gui::topDiameter Å\n"
+        append detailed_message "Bottom diameter: $::PETK::gui::bottomDiameter Å\n"
     }
     
     if {$is_valid} {
