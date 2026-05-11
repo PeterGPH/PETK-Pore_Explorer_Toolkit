@@ -302,8 +302,8 @@ class VerticalMovementSEM:
                             "Set cleanup_temp_files=False for detailed output dumps.")
         
         # Validate pore type / bin units
-        if self.pore_type not in ["cylindrical", "double_cone", "biological", "bin_file"]:
-            raise ValueError("pore_type must be 'cylindrical', 'double_cone', 'biological', or 'bin_file'")
+        if self.pore_type not in ["cylindrical", "double_cone", "conical", "biological", "bin_file"]:
+            raise ValueError("pore_type must be 'cylindrical', 'double_cone', 'conical', 'biological', or 'bin_file'")
         if self.pore_type == "bin_file":
             valid_units = ("distance", "conductivity")
             if self.bin_file_units not in valid_units:
@@ -468,6 +468,13 @@ class VerticalMovementSEM:
             max_radius = self.pore_radius
         elif self.pore_type == "double_cone":
             max_radius = self.outer_radius
+        elif self.pore_type == "conical":
+            if self.top_radius is None or self.bottom_radius is None:
+                raise ValueError(
+                    "Conical pore requires both top_radius and bottom_radius "
+                    "to auto-calculate box dimensions."
+                )
+            max_radius = max(self.top_radius, self.bottom_radius)
         elif self.pore_type == "bin_file":
             # For bin files, try to read the dimensions
             try:
@@ -528,7 +535,7 @@ class VerticalMovementSEM:
             logger.info(f"Creating base conductivity grid for {self.pore_type} pore...")
         
         # Create grid if needed (for grid-based pores)
-        if self.pore_type in ["cylindrical", "double_cone", "biological"]:
+        if self.pore_type in ["cylindrical", "double_cone", "conical", "biological"]:
             x_range = np.linspace(
                 self.box_dimensions['x'][0],
                 self.box_dimensions['x'][1],
