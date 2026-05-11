@@ -75,3 +75,4 @@ padding_sweep_*/
 # --- Editor / AI assistant scratch ---
 .claude/
 petk.backup/
+sem.backup/

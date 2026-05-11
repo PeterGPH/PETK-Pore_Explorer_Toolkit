@@ -286,26 +286,9 @@ def prepare_structure(
     use_external_pdb2pqr: bool = False,
     pdb2pqr_force_field: str = "PARSE",
     pdb2pqr_extra_flags: Optional[Iterable[str]] = None,
-    pdb2pqr_fallback_to_vdw: bool = True,
 ) -> PreparedStructure:
     """
     High-level helper that performs hydrogenation and PQR generation.
-
-    When ``use_external_pdb2pqr=True``, runs the external ``pdb2pqr`` binary
-    against the input PDB. If that subprocess fails (non-zero exit, e.g.,
-    non-integer charge tolerance, missing topology for non-standard residues
-    like LYG/DG-with-modifications, or the binary itself is not on PATH),
-    behavior depends on ``pdb2pqr_fallback_to_vdw``:
-
-    * ``True`` (default): logs a WARNING and silently falls back to the
-      pdbfixer + ``pdb_to_pqr`` path (charges from PDB if present else 0,
-      radii from VanDerWaalsRadii). Downstream code receives a valid PQR.
-    * ``False``: raises ``RuntimeError`` (legacy behavior).
-
-    The fallback is recommended for sweeps over many structures where some
-    may fail pdb2pqr's strict checks (e.g., MD-dumped frames, structures
-    with crosslinks). For analyses where charges are critical and a silent
-    radius-only fallback would mislead the result, set ``False``.
     """
     workdir = Path(
         tempfile.mkdtemp(prefix="sem_prep_", dir=str(temp_root) if temp_root else None)
@@ -321,11 +304,6 @@ def prepare_structure(
     element_overrides, atom_overrides = _split_radius_overrides(overrides)
     radius_table.update(element_overrides)
     atom_radius_table.update(atom_overrides)
-
-    # Track whether the pdb2pqr branch produced a usable PQR. If not (either
-    # because we never tried, or because we tried and it failed and fallback
-    # is enabled), the vdW branch below runs as the safety net.
-    pdb2pqr_path_succeeded = False
 
     if use_external_pdb2pqr:
         logger.info(
@@ -345,14 +323,6 @@ def prepare_structure(
         generated_pqr = workdir / f"{pdb_in.stem}_pdb2pqr_raw.pqr"
         pdb2pqr_cmd.extend([str(pdb_in), str(generated_pqr)])
 
-        # Failure modes we transparently handle when fallback is enabled:
-        #   CalledProcessError    — pdb2pqr ran but exited nonzero
-        #                            (charge-integrality error, force-field
-        #                            mismatch, unknown residue, etc.)
-        #   FileNotFoundError     — pdb2pqr binary not installed / not on PATH
-        # OSError covers other exec-level failures (permissions, etc.).
-        pdb2pqr_failure: Optional[BaseException] = None
-        pdb2pqr_stderr_excerpt = ""
         try:
             subprocess.run(
                 pdb2pqr_cmd,
@@ -361,73 +331,36 @@ def prepare_structure(
                 text=True,
             )
         except subprocess.CalledProcessError as exc:
-            pdb2pqr_failure = exc
-            pdb2pqr_stderr_excerpt = (exc.stderr or "").strip()
-        except (FileNotFoundError, OSError) as exc:
-            pdb2pqr_failure = exc
-            pdb2pqr_stderr_excerpt = str(exc)
+            logger.error("pdb2pqr failed: %s", exc.stderr)
+            raise RuntimeError("pdb2pqr execution failed") from exc
 
-        if pdb2pqr_failure is None:
-            # Subprocess succeeded; finish the pdb2pqr path: rewrite radii
-            # and generate the companion PDB-with-H file.
-            try:
-                _rewrite_pqr_with_custom_radii(
-                    generated_pqr,
-                    pqr_out,
-                    element_radius_table=radius_table,
-                    atom_radius_table=atom_radius_table,
-                    default_radius=default_radius,
-                )
-                try:
-                    import MDAnalysis as mda
+        _rewrite_pqr_with_custom_radii(
+            generated_pqr,
+            pqr_out,
+            element_radius_table=radius_table,
+            atom_radius_table=atom_radius_table,
+            default_radius=default_radius,
+        )
 
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", category=UserWarning)
-                        universe = mda.Universe(str(pqr_out))
-                        universe.atoms.write(str(pdb_with_h))
-                except Exception as exc:
-                    logger.warning(
-                        "Could not generate PDB from PQR using MDAnalysis: %s; "
-                        "using PQR as placeholder for pdb_with_h.",
-                        exc,
-                    )
-                    pdb_with_h.write_text(pqr_out.read_text())
-                pdb2pqr_path_succeeded = True
-            finally:
-                if generated_pqr.exists():
-                    generated_pqr.unlink(missing_ok=True)
-        else:
-            # pdb2pqr subprocess failed. Either fall back to vdW or re-raise.
-            if pdb2pqr_fallback_to_vdw:
-                # Truncate stderr — pdb2pqr can produce many KB on a bad file.
-                excerpt = pdb2pqr_stderr_excerpt[-800:] if pdb2pqr_stderr_excerpt else "(no stderr)"
-                logger.warning(
-                    "pdb2pqr failed (%s); falling back to pdbfixer + vdW "
-                    "radii. Charges in the output PQR will be zero for any "
-                    "atom whose source PDB B-factor field doesn't carry a "
-                    "charge, so any electrostatic-sensitive analysis "
-                    "downstream is now using a radius-only model. To force "
-                    "a hard failure instead, pass "
-                    "pdb2pqr_fallback_to_vdw=False.\n"
-                    "  pdb2pqr stderr (last 800 chars):\n%s",
-                    type(pdb2pqr_failure).__name__,
-                    excerpt,
-                )
-                # Clean up partial output (may exist if pdb2pqr wrote some
-                # rows before the integrality check fired).
-                if generated_pqr.exists():
-                    generated_pqr.unlink(missing_ok=True)
-                # Fall through: pdb2pqr_path_succeeded stays False, so the
-                # vdW branch below will execute.
-            else:
-                stderr_for_log = pdb2pqr_stderr_excerpt or "(no stderr)"
-                logger.error("pdb2pqr failed: %s", stderr_for_log)
-                raise RuntimeError("pdb2pqr execution failed") from pdb2pqr_failure
+        try:
+            import MDAnalysis as mda
 
-    if not pdb2pqr_path_succeeded:
-        # Default / fallback path. Runs unconditionally when
-        # use_external_pdb2pqr=False, AND on pdb2pqr failure when fallback is
-        # enabled.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=UserWarning)
+                universe = mda.Universe(str(pqr_out))
+                universe.atoms.write(str(pdb_with_h))
+        except Exception as exc:
+            logger.warning(
+                "Could not generate PDB from PQR using MDAnalysis: %s; "
+                "using PQR as placeholder for pdb_with_h.",
+                exc,
+            )
+            pdb_with_h.write_text(pqr_out.read_text())
+
+        if generated_pqr.exists():
+            generated_pqr.unlink(missing_ok=True)
+
+    else:
         add_hydrogens_with_pdbfixer(
             pdb_in,
             pdb_with_h,

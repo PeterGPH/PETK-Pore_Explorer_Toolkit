@@ -67,17 +67,26 @@ if _MPI_RANK != 0:
     for _handler in _root_logger.handlers:
         _handler.setLevel(logging.ERROR)
 
+# Import main classes and functions
+from .vertical_movement_sem import VerticalMovementSEM, AnalyteOverlapError
+from .van_der_waals import VanDerWaalsRadii
+from .pore_geometry import PoreGeometry
+from .conductivity_models import SimpleConductivityModel
+from .config import load_config, validate_config, print_config_summary, create_example_config
+from .rotation import RotationSpec, rotate_pdb_to_grid_center, parse_angle_file, random_uniform_rotations
+from .cli import main, create_sem_from_config
+
 # Package metadata
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __author__ = "Pinhao Gu"
 __email__ = "pinhao2@illinois.edu"
 __description__ = "Steric Exclusion Model calculations for nanopore analytics"
 
-# Public API — see _LAZY below for the (name -> module) routing.
+# Export main classes and functions
 __all__ = [
     'VerticalMovementSEM',
     'AnalyteOverlapError',
-    'VanDerWaalsRadii',
+    'VanDerWaalsRadii', 
     'PoreGeometry',
     'SimpleConductivityModel',
     'load_config',
@@ -88,53 +97,5 @@ __all__ = [
     'rotate_pdb_to_grid_center',
     'parse_angle_file',
     'random_uniform_rotations',
-    'main',
-    'create_sem_from_config',
+    'main'
 ]
-
-# PEP 562 lazy attribute loading. Why:
-#   - `VerticalMovementSEM`, `PoreGeometry`, `cli.main` transitively import
-#     `dolfinx`, which only ships via conda-forge. Eager imports here mean
-#     `import sem` fails for any pip-only environment (e.g. our CI smoke
-#     test, downstream tools that just want VanDerWaalsRadii or load_config).
-#   - Lazy `__getattr__` defers every public symbol until first access. The
-#     pip-only smoke test gets a successful `import sem` + `__version__`
-#     readout; real users running `from sem import VerticalMovementSEM`
-#     trigger the dolfinx import exactly when the symbol is requested, with
-#     a clean ImportError if dolfinx isn't installed.
-#   - This is the modern Python idiom for optional heavy dependencies
-#     (numpy, sklearn, dask all use the same pattern).
-_LAZY = {
-    'VerticalMovementSEM':       ('.vertical_movement_sem', 'VerticalMovementSEM'),
-    'AnalyteOverlapError':       ('.vertical_movement_sem', 'AnalyteOverlapError'),
-    'VanDerWaalsRadii':          ('.van_der_waals',         'VanDerWaalsRadii'),
-    'PoreGeometry':              ('.pore_geometry',         'PoreGeometry'),
-    'SimpleConductivityModel':   ('.conductivity_models',   'SimpleConductivityModel'),
-    'load_config':               ('.config',                'load_config'),
-    'validate_config':           ('.config',                'validate_config'),
-    'print_config_summary':      ('.config',                'print_config_summary'),
-    'create_example_config':     ('.config',                'create_example_config'),
-    'RotationSpec':              ('.rotation',              'RotationSpec'),
-    'rotate_pdb_to_grid_center': ('.rotation',              'rotate_pdb_to_grid_center'),
-    'parse_angle_file':          ('.rotation',              'parse_angle_file'),
-    'random_uniform_rotations':  ('.rotation',              'random_uniform_rotations'),
-    'main':                      ('.cli',                   'main'),
-    'create_sem_from_config':    ('.cli',                   'create_sem_from_config'),
-}
-
-
-def __getattr__(name):
-    if name in _LAZY:
-        import importlib
-        module_path, attr = _LAZY[name]
-        mod = importlib.import_module(module_path, package=__package__)
-        value = getattr(mod, attr)
-        # Cache on the module so subsequent accesses skip __getattr__.
-        globals()[name] = value
-        return value
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def __dir__():
-    # Make tab-completion / dir(sem) report the public names.
-    return sorted(set(globals()) | set(_LAZY))

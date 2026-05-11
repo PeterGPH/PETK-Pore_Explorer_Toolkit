@@ -65,7 +65,7 @@ def validate_config(config, require_analyte=True):
     
     # Validate pore type
     pore_type = config["pore_geometry"].get("pore_type", "").lower()
-    valid_pore_types = ["cylindrical", "double_cone", "biological", "bin_file"]
+    valid_pore_types = ["cylindrical", "double_cone", "conical", "biological", "bin_file"]
     
     if pore_type not in valid_pore_types:
         logger.error(f"Invalid pore_type: {pore_type}. Must be one of: {valid_pore_types}")
@@ -85,6 +85,24 @@ def validate_config(config, require_analyte=True):
         outer_radius = config["pore_geometry"].get("outer_radius", pore_radius * 1.5)
         if outer_radius <= pore_radius:
             logger.error("For double_cone pore, outer_radius must be greater than pore_radius")
+            return False
+
+    if pore_type == "conical":
+        top_radius = config["pore_geometry"].get("top_radius")
+        bottom_radius = config["pore_geometry"].get("bottom_radius")
+        if top_radius is None or bottom_radius is None:
+            logger.error(
+                "For conical pore, both top_radius and bottom_radius must be provided"
+            )
+            return False
+        try:
+            top_radius = float(top_radius)
+            bottom_radius = float(bottom_radius)
+        except (TypeError, ValueError):
+            logger.error("conical top_radius and bottom_radius must be numeric")
+            return False
+        if top_radius <= 0 or bottom_radius <= 0:
+            logger.error("conical top_radius and bottom_radius must be > 0")
             return False
     
     # Ensure defaults for optional parameters
@@ -241,6 +259,9 @@ def print_config_summary(config):
             logger.info(f"  Binary file stores: {pore_geom.get('bin_file_units', 'distance')}")
             if "mask_radius" in pore_geom and pore_geom["mask_radius"] > 0:
                 logger.info(f"  Mask Radius: {pore_geom['mask_radius']} Å")
+        elif pore_geom['pore_type'].lower() == "conical":
+            logger.info(f"  Top Radius: {pore_geom.get('top_radius', 'Not specified')} Å")
+            logger.info(f"  Bottom Radius: {pore_geom.get('bottom_radius', 'Not specified')} Å")
         else:
             logger.info(f"  Pore Radius: {pore_geom.get('pore_radius', 100.0)} Å")
             if pore_geom.get("corner_radius", 0) > 0:
@@ -356,6 +377,13 @@ def create_example_config(pore_type="cylindrical", output_file="example_config.j
             "pore_type": "double_cone",
             "pore_radius": 80.0,
             "outer_radius": 120.0,
+            "membrane_thickness": 200.0
+        }
+    elif pore_type == "conical":
+        base_config["pore_geometry"] = {
+            "pore_type": "conical",
+            "top_radius": 120.0,
+            "bottom_radius": 60.0,
             "membrane_thickness": 200.0
         }
     elif pore_type == "biological":

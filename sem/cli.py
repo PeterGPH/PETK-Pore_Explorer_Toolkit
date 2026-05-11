@@ -61,6 +61,8 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
     # Type-specific parameters
     corner_radius = pore_geom.get("corner_radius", 0.0)
     outer_radius = pore_geom.get("outer_radius", None)
+    top_radius = pore_geom.get("top_radius", None)
+    bottom_radius = pore_geom.get("bottom_radius", None)
     biological_pore_pdb = pore_geom.get("biological_pore_pdb", None)
     bin_file_path = pore_geom.get("bin_file_path", None)
     bin_file_units = pore_geom.get("bin_file_units", "distance").lower()
@@ -136,6 +138,8 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
         pore_type=pore_type,
         pore_radius=pore_radius,
         outer_radius=outer_radius,
+        top_radius=top_radius,
+        bottom_radius=bottom_radius,
         corner_radius=corner_radius,
         biological_pore_pdb=biological_pore_pdb,
         bin_file_path=bin_file_path,
@@ -284,6 +288,9 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
         output_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[tuple[int, float, float, float, float]] = []
+    # Hybrid trace: rows of (idx, rx, ry, rz, z, current, normalized_current, blockage),
+    # populated only when mode == 'run' so PETK can render a (z × rotation) overlay.
+    hybrid_rows: list[tuple[int, float, float, float, float, float, float, float]] = []
     prefix_base = base_config_copy["output"].get("output_prefix", "vertical_movement")
 
     for offset, rotation_spec in enumerate(rotations):
@@ -364,6 +371,29 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
                 if rank == 0 and run_results and len(run_results.get("currents", [])) > 0:
                     final_current = float(run_results["currents"][-1])
                     results.append((idx, rotation_spec.rx, rotation_spec.ry, rotation_spec.rz, final_current))
+                    # Capture full z-trace for hybrid output. Lengths are aligned by run().
+                    z_positions = run_results.get("z_positions", []) or []
+                    currents_full = run_results.get("currents", []) or []
+                    norm_full = run_results.get("normalized_currents", []) or []
+                    block_full = run_results.get("blockages", []) or []
+                    n_z = len(z_positions)
+                    if n_z and n_z == len(currents_full):
+                        # Pad missing optional series with NaN so columns align.
+                        if len(norm_full) != n_z:
+                            norm_full = [float("nan")] * n_z
+                        if len(block_full) != n_z:
+                            block_full = [float("nan")] * n_z
+                        for k in range(n_z):
+                            hybrid_rows.append((
+                                idx,
+                                float(rotation_spec.rx),
+                                float(rotation_spec.ry),
+                                float(rotation_spec.rz),
+                                float(z_positions[k]),
+                                float(currents_full[k]),
+                                float(norm_full[k]),
+                                float(block_full[k]),
+                            ))
             elif args.mode == 'preview_only':
                 if rank == 0:
                     logger.info("Generating preview frames for rotation %s", rotation_spec.label())
@@ -398,6 +428,21 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
             writer.writerow(["index", "rx", "ry", "rz", "current_nA"])
             writer.writerows(results)
         logger.info("Rotation scan results saved to %s", results_path)
+
+    if hybrid_rows and rank == 0:
+        hybrid_path = output_dir / "hybrid_currents.csv"
+        with open(hybrid_path, "w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow([
+                "index", "rx", "ry", "rz",
+                "z_A", "current_nA", "normalized_current", "blockage",
+            ])
+            writer.writerows(hybrid_rows)
+        logger.info(
+            "Hybrid (translocation × rotation) trace saved to %s "
+            "(%d rows across %d rotations)",
+            hybrid_path, len(hybrid_rows), len(results),
+        )
 
 def main():
     """

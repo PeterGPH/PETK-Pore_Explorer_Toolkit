@@ -110,9 +110,11 @@ class VerticalMovementSEM:
     
     def __init__(self, 
                  moving_pdb,        # Centered analyte
-                 pore_type="cylindrical",  # "cylindrical", "double_cone", "biological", or "bin_file"
+                 pore_type="cylindrical",  # "cylindrical", "double_cone", "conical", "biological", or "bin_file"
                  pore_radius=100.0,  # Pore radius (Å) - for cylindrical or inner radius for double cone
                  outer_radius=None,  # Outer radius for double cone (Å) - if None, uses pore_radius * 1.5
+                 top_radius=None,    # Top-face radius for conical pore (Å)
+                 bottom_radius=None, # Bottom-face radius for conical pore (Å)
                  corner_radius=0.0,  # Corner radius for cylindrical pore (Å)
                  biological_pore_pdb=None,  # Path to PDB file for biological pore
                  bin_file_path=None,  # Path to binary file for bin_file pore
@@ -166,6 +168,8 @@ class VerticalMovementSEM:
         self.pore_type = pore_type.lower()
         self.pore_radius = pore_radius
         self.outer_radius = outer_radius if outer_radius is not None else pore_radius * 1.5
+        self.top_radius = top_radius
+        self.bottom_radius = bottom_radius
         self.corner_radius = corner_radius
         self.biological_pore_pdb = biological_pore_pdb
         self.bin_file_path = bin_file_path
@@ -546,10 +550,10 @@ class VerticalMovementSEM:
         
         # Create pore object
         pore_kwargs = {}
-        if self.pore_type in ["cylindrical", "double_cone", "biological"]:
+        if self.pore_type in ["cylindrical", "double_cone", "conical", "biological"]:
             pore_kwargs['bulk_conductivity'] = self.bulk_conductivity
             pore_kwargs['membrane_conductivity'] = self.membrane_conductivity
-        
+
         if self.pore_type == "cylindrical":
             pore_kwargs.update({
                 'pore_radius': self.pore_radius,
@@ -560,6 +564,16 @@ class VerticalMovementSEM:
             pore_kwargs.update({
                 'inner_radius': self.pore_radius,
                 'outer_radius': self.outer_radius,
+                'membrane_half_thickness': self.membrane_thickness / 2
+            })
+        elif self.pore_type == "conical":
+            if self.top_radius is None or self.bottom_radius is None:
+                raise ValueError(
+                    "Conical pore requires both top_radius and bottom_radius."
+                )
+            pore_kwargs.update({
+                'top_radius': self.top_radius,
+                'bottom_radius': self.bottom_radius,
                 'membrane_half_thickness': self.membrane_thickness / 2
             })
         elif self.pore_type == "bin_file":
@@ -1059,6 +1073,50 @@ class VerticalMovementSEM:
                     f"distance {distances[idx]:.3f} Å <= radius {atom_radii[idx]:.3f} Å "
                     f"+ buffer {buffer:.3f} Å at ({bad_point[0]:.2f}, "
                     f"{bad_point[1]:.2f}, {bad_point[2]:.2f}) Å."
+                )
+            return
+
+        if self.pore_type == "conical":
+            membrane_half_thickness = self.membrane_thickness / 2.0
+            if membrane_half_thickness <= 0:
+                return
+            if self.top_radius is None or self.bottom_radius is None:
+                raise AnalyteOverlapError(
+                    "Conical overlap check requires both top_radius and bottom_radius "
+                    "to be set on the SEM instance."
+                )
+            R = np.sqrt(atom_positions[:, 0] ** 2 + atom_positions[:, 1] ** 2)
+            signed_z = atom_positions[:, 2]
+            abs_z = np.abs(signed_z)
+            # Asymmetric linear interpolation in *signed* z, matching
+            # ConicalPore.get_conductivity_interpolator in pore_geometry.py:
+            #   t = 0 at z = -half_thickness (bottom face)
+            #   t = 1 at z = +half_thickness (top face)
+            thickness = 2.0 * membrane_half_thickness
+            t = np.clip((signed_z + membrane_half_thickness) / thickness, 0.0, 1.0)
+            local_radius = self.bottom_radius + (self.top_radius - self.bottom_radius) * t
+            distances = self._distance_to_membrane(R, abs_z, local_radius, membrane_half_thickness)
+            if fixed_threshold is not None:
+                overlap_mask = distances <= (fixed_threshold + buffer)
+            else:
+                overlap_mask = distances <= (atom_radii + buffer)
+            if np.any(overlap_mask):
+                idx = np.flatnonzero(overlap_mask)[0]
+                bad_point = atom_positions[idx]
+                if fixed_threshold is not None:
+                    raise AnalyteOverlapError(
+                        "Analyte overlaps conical membrane wall: "
+                        f"distance {distances[idx]:.3f} Å <= threshold "
+                        f"{fixed_threshold:.3f} Å + buffer {buffer:.3f} Å at "
+                        f"({bad_point[0]:.2f}, {bad_point[1]:.2f}, {bad_point[2]:.2f}) Å "
+                        f"(local pore radius {local_radius[idx]:.3f} Å)."
+                    )
+                raise AnalyteOverlapError(
+                    "Analyte hard core overlaps conical membrane wall: "
+                    f"distance {distances[idx]:.3f} Å <= radius {atom_radii[idx]:.3f} Å "
+                    f"+ buffer {buffer:.3f} Å at ({bad_point[0]:.2f}, "
+                    f"{bad_point[1]:.2f}, {bad_point[2]:.2f}) Å "
+                    f"(local pore radius {local_radius[idx]:.3f} Å)."
                 )
             return
 

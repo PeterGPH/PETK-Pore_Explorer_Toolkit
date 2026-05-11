@@ -1,6 +1,6 @@
 """
 Pore geometry classes and functions.
-Handles different pore types: cylindrical, double_cone, biological, and bin_file.
+Handles different pore types: cylindrical, conical, double_cone, biological, and bin_file.
 """
 
 import numpy as np
@@ -190,6 +190,69 @@ class DoubleConePore(BasePore):
                 bounds_error=False, fill_value=self.bulk_conductivity
             )
         return self._interpolator
+
+class ConicalPore(BasePore):
+    """Single truncated cone (frustum) pore.
+
+    Asymmetric about z=0: ``bottom_radius`` at z=-membrane_half_thickness,
+    ``top_radius`` at z=+membrane_half_thickness, linearly interpolated in
+    between. If top_radius == bottom_radius the pore degenerates to a
+    cylinder.
+    """
+
+    def __init__(self, X, Y, Z, top_radius, bottom_radius, membrane_half_thickness,
+                 bulk_conductivity=10.5, membrane_conductivity=0.0001):
+        if membrane_half_thickness <= 0:
+            raise ValueError("Conical pore requires a non-zero membrane thickness.")
+        if top_radius <= 0 or bottom_radius <= 0:
+            raise ValueError("Conical pore requires positive top_radius and bottom_radius.")
+        self.X = X
+        self.Y = Y
+        self.Z = Z
+        self.top_radius = top_radius
+        self.bottom_radius = bottom_radius
+        self.membrane_half_thickness = membrane_half_thickness
+        self.bulk_conductivity = bulk_conductivity
+        self.membrane_conductivity = membrane_conductivity
+        self._interpolator = None
+        self._local_pore_radius = None
+
+    def get_conductivity_interpolator(self):
+        if self._interpolator is None:
+            R = np.sqrt(self.X**2 + self.Y**2)
+
+            # Asymmetric linear interpolation along z (NOT abs(Z) like double_cone).
+            # t = 0 at the bottom face, t = 1 at the top face.
+            t = np.clip(
+                (self.Z + self.membrane_half_thickness) / (2.0 * self.membrane_half_thickness),
+                0.0,
+                1.0,
+            )
+            local_pore_radius = self.bottom_radius + (self.top_radius - self.bottom_radius) * t
+            self._local_pore_radius = local_pore_radius
+
+            distance_map = _distance_to_membrane(
+                R,
+                np.abs(self.Z),
+                local_pore_radius,
+                self.membrane_half_thickness,
+            )
+            conductivity_grid = _conductivity_from_distance(
+                distance_map,
+                self.bulk_conductivity,
+                self.membrane_conductivity,
+            )
+
+            x_range = np.unique(self.X[:, 0, 0])
+            y_range = np.unique(self.Y[0, :, 0])
+            z_range = np.unique(self.Z[0, 0, :])
+
+            self._interpolator = RegularGridInterpolator(
+                (x_range, y_range, z_range), conductivity_grid,
+                bounds_error=False, fill_value=self.bulk_conductivity
+            )
+        return self._interpolator
+
 
 class BinFilePore(BasePore):
     def __init__(self, bin_file_path, base_sigma, mask_radius=-1, data_units="distance"):
@@ -414,12 +477,9 @@ class BiologicalPore(BasePore):
                 SEARCH_LENGTH = 2  # Same as gen_dist.py
                 max_search_radius = cutoff  # User's modification
                 
-                # Apply translation to match gen_dist.py workflow.
-                # gen_dist.py translates atoms by subtracting the lower-bound
-                # corner so they live in [0, Lm] x [0, Wm] x [0, Hm], which is
-                # the coordinate space the spatial-hash indexing below assumes.
-                # (Variable name predates this comment; kept for minimal diff.)
-                center_coords = np.array([x_min, y_min, z_min])
+                # Apply translation to match gen_dist.py workflow
+                # gen_dist.py translates atoms by subtracting lower bounds
+                center_coords = np.array([center_x, center_y, center_z])
                 translated_pore_positions = pore_positions - center_coords
                 
                 # Set up spatial hashing like gen_dist.py
@@ -830,6 +890,8 @@ class PoreGeometry:
             return CylindricalPore(X, Y, Z, **kwargs)
         elif pore_type == "double_cone":
             return DoubleConePore(X, Y, Z, **kwargs)
+        elif pore_type == "conical":
+            return ConicalPore(X, Y, Z, **kwargs)
         elif pore_type == "bin_file":
             return BinFilePore(**kwargs)
         elif pore_type == "biological":
