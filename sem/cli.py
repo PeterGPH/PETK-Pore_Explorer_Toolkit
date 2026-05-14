@@ -384,10 +384,18 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
                     final_current = float(run_results["currents"][-1])
                     results.append((idx, rotation_spec.rx, rotation_spec.ry, rotation_spec.rz, final_current))
                     # Capture full z-trace for hybrid output. Lengths are aligned by run().
-                    z_positions = run_results.get("z_positions", []) or []
-                    currents_full = run_results.get("currents", []) or []
-                    norm_full = run_results.get("normalized_currents", []) or []
-                    block_full = run_results.get("blockages", []) or []
+                    z_positions = run_results.get("z_positions")
+                    if z_positions is None:
+                        z_positions = []
+                    currents_full = run_results.get("currents")
+                    if currents_full is None:
+                        currents_full = []
+                    norm_full = run_results.get("normalized_currents")
+                    if norm_full is None:
+                        norm_full = []
+                    block_full = run_results.get("blockages")
+                    if block_full is None:
+                        block_full = []
                     n_z = len(z_positions)
                     if n_z and n_z == len(currents_full):
                         # Pad missing optional series with NaN so columns align.

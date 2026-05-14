@@ -3471,13 +3471,13 @@ proc ::PETK::gui::applyPlotEnhancements {} {
         return $entries
     }
 
-    # Render hybrid_currents.csv (full z × rotation trace) as a two-panel figure:
-    #   1. heatmap of current(z, rotation_idx) — shows every (z, rotation) cell
-    #   2. mean ± 1 std band over z — orientation-averaged behaviour with spread
-    # Also writes hybrid_summary.csv with per-z statistics (mean, std, min, max,
-    # n_rotations) for downstream analysis. Skipped rotations (NaN currents
-    # from overlap detection) are handled with np.nanmean / np.nanstd, so they
-    # don't contaminate the band.
+    # Render hybrid_currents.csv (full z × rotation trace) as a single
+    # Normalized-Current-vs-z plot. At each z, the mean over rotations is the
+    # marker; asymmetric error bars span [min, max] across rotations (i.e.
+    # lower = mean - min, upper = max - mean). Rotations dropped by the overlap
+    # check contribute NaNs and are excluded via np.nanmean / np.nanmin /
+    # np.nanmax. Also writes hybrid_summary.csv with per-z statistics (mean,
+    # std, min, max, n_rotations) on normalized current for downstream analysis.
     proc ::PETK::gui::plot::plotHybridCurrentsCsv {csv_path} {
         if {![file exists $csv_path]} {
             tk_messageBox -icon error -title "Plot Error" \
@@ -3485,7 +3485,7 @@ proc ::PETK::gui::applyPlotEnhancements {} {
             return
         }
         set out_dir [file dirname $csv_path]
-        set output_path [file join $out_dir "hybrid_heatmap_meanstd.png"]
+        set output_path [file join $out_dir "hybrid_normcurrent_minmax.png"]
         set summary_path [file join $out_dir "hybrid_summary.csv"]
         set output_path_py  [string map {"\\" "\\\\"} $output_path]
         set summary_path_py [string map {"\\" "\\\\"} $summary_path]
@@ -3501,8 +3501,8 @@ csv_path = r"%s"
 output_path = r"%s"
 summary_path = r"%s"
 
-# ---- Load (idx, z) -> current. Group by rotation index. ---------------------
-by_rot = defaultdict(dict)   # idx -> {z: current}
+# ---- Load (idx, z) -> normalized_current. Group by rotation index. ----------
+by_rot = defaultdict(dict)   # idx -> {z: normalized_current}
 rot_meta = {}                # idx -> (rx, ry, rz)
 all_z = set()
 with open(csv_path, "r", newline="") as fh:
@@ -3511,10 +3511,10 @@ with open(csv_path, "r", newline="") as fh:
         try:
             idx = int(row["index"])
             z = float(row["z_A"])
-            current = float(row["current_nA"])
+            norm = float(row["normalized_current"])
         except (KeyError, ValueError):
             continue
-        by_rot[idx][z] = current
+        by_rot[idx][z] = norm
         all_z.add(z)
         rot_meta[idx] = (row.get("rx", ""), row.get("ry", ""), row.get("rz", ""))
 
@@ -3533,79 +3533,60 @@ else:
             if z in by_rot[idx]:
                 mat[i, j] = by_rot[idx][z]
 
-    # NaN-safe mean / std across rotations at each z (skipped rotations
-    # contribute NaN and are excluded from the statistics).
+    # NaN-safe stats across rotations at each z (skipped rotations contribute
+    # NaN and are excluded).
     with np.errstate(invalid="ignore", divide="ignore"):
-        mean_current = np.nanmean(mat, axis=0)
-        std_current  = np.nanstd(mat,  axis=0)
-        n_valid      = np.sum(~np.isnan(mat), axis=0)
-        min_current  = np.nanmin(mat, axis=0)
-        max_current  = np.nanmax(mat, axis=0)
+        mean_norm = np.nanmean(mat, axis=0)
+        std_norm  = np.nanstd(mat,  axis=0)
+        min_norm  = np.nanmin(mat, axis=0)
+        max_norm  = np.nanmax(mat, axis=0)
+        n_valid   = np.sum(~np.isnan(mat), axis=0)
 
-    # ---- Two-panel figure: heatmap on top, mean ± std on bottom. -------------
-    fig, (ax_hm, ax_ms) = plt.subplots(
-        2, 1, figsize=(9.5, 8.0), sharex=True,
-        gridspec_kw={"height_ratios": [2, 1]},
-    )
+    # ---- Errorbar plot: mean marker + asymmetric min/max error bars. --------
+    # yerr lower = mean - min, upper = max - mean. Clamp tiny negatives that
+    # can arise from float jitter when min == mean.
+    lower = mean_norm - min_norm
+    upper = max_norm - mean_norm
+    lower = np.where(lower < 0, 0.0, lower)
+    upper = np.where(upper < 0, 0.0, upper)
+    yerr = np.vstack([lower, upper])
+    n_used = int(np.nanmax(n_valid)) if np.any(n_valid > 0) else 0
 
-    # Heatmap. pcolormesh with an explicit edges-style grid so each cell is
-    # accurately positioned. Use the "viridis" cmap (perceptually uniform).
-    if n_z > 1:
-        dz = np.diff(z_grid)
-        z_edges = np.concatenate([
-            [z_grid[0] - dz[0] / 2.0],
-            z_grid[:-1] + dz / 2.0,
-            [z_grid[-1] + dz[-1] / 2.0],
-        ])
-    else:
-        z_edges = np.array([z_grid[0] - 0.5, z_grid[0] + 0.5])
-    rot_edges = np.arange(n_rot + 1) - 0.5
-    pcm = ax_hm.pcolormesh(
-        z_edges, rot_edges, mat, cmap="viridis", shading="auto",
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.errorbar(
+        z_grid, mean_norm, yerr=yerr,
+        fmt="o-",
+        capsize=3,
+        elinewidth=1.5,
+        markersize=4,
+        color="C0",
+        label=f"mean (n={n_used} rotations)",
     )
-    ax_hm.set_ylabel("Rotation index", fontsize=12, weight="bold")
-    ax_hm.set_title(
-        f"Hybrid: current(z, rotation) — {n_rot} rotations × {n_z} z-positions",
-        fontsize=13, weight="bold",
+    ax.set_xlabel("Z position (A)", fontsize=14, weight="bold")
+    ax.set_ylabel("Normalized Current", fontsize=14, weight="bold")
+    ax.set_title(
+        f"Normalized Current with min-max error bars over {n_used} rotations",
+        fontsize=14, weight="bold",
     )
-    cbar = fig.colorbar(pcm, ax=ax_hm, pad=0.02)
-    cbar.set_label("Current (nA)", fontsize=11)
-    if n_rot <= 30:
-        ax_hm.set_yticks(np.arange(n_rot))
-
-    # Mean ± std band.
-    ax_ms.plot(z_grid, mean_current, "-", color="C0", linewidth=2.0,
-               label="Mean over rotations")
-    ax_ms.fill_between(
-        z_grid, mean_current - std_current, mean_current + std_current,
-        color="C0", alpha=0.25, label="± 1 std",
-    )
-    # Faint min/max envelope so outliers are visible.
-    ax_ms.plot(z_grid, min_current, ":", color="gray", linewidth=0.9,
-               alpha=0.7, label="min / max")
-    ax_ms.plot(z_grid, max_current, ":", color="gray", linewidth=0.9,
-               alpha=0.7)
-    ax_ms.set_xlabel("Z position (Å)", fontsize=12, weight="bold")
-    ax_ms.set_ylabel("Current (nA)", fontsize=12, weight="bold")
-    ax_ms.legend(loc="best", fontsize=9)
-    ax_ms.grid(True, alpha=0.3)
+    ax.grid(True)
+    ax.legend()
 
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
+    plt.savefig(output_path, dpi=200)
     print(f"Saved {output_path}")
 
     # ---- Per-z summary CSV for downstream analysis. -------------------------
     with open(summary_path, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["z_A", "mean_current_nA", "std_current_nA",
-                    "min_current_nA", "max_current_nA", "n_rotations"])
+        w.writerow(["z_A", "mean_norm_current", "std_norm_current",
+                    "min_norm_current", "max_norm_current", "n_rotations"])
         for k, z in enumerate(z_grid):
             row = [
                 f"{z:.4f}",
-                f"{mean_current[k]:.6e}" if np.isfinite(mean_current[k]) else "",
-                f"{std_current[k]:.6e}"  if np.isfinite(std_current[k])  else "",
-                f"{min_current[k]:.6e}"  if np.isfinite(min_current[k])  else "",
-                f"{max_current[k]:.6e}"  if np.isfinite(max_current[k])  else "",
+                f"{mean_norm[k]:.6e}" if np.isfinite(mean_norm[k]) else "",
+                f"{std_norm[k]:.6e}"  if np.isfinite(std_norm[k])  else "",
+                f"{min_norm[k]:.6e}"  if np.isfinite(min_norm[k])  else "",
+                f"{max_norm[k]:.6e}"  if np.isfinite(max_norm[k])  else "",
                 int(n_valid[k]),
             ]
             w.writerow(row)
