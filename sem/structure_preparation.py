@@ -10,6 +10,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
+import re
 import subprocess
 
 from .van_der_waals import VanDerWaalsRadii
@@ -214,7 +215,7 @@ def pdb_to_pqr(
 
             pqr_line = (
                 f"{record:<6}{serial:>5} {name:<4}{alt_loc}{res_name:>3} {chain_id}"
-                f"{res_seq:>4}{i_code}   {x:>8.3f}{y:>8.3f}{z:>8.3f} "
+                f"{res_seq:>4}{i_code}   {x:>8.3f} {y:>8.3f} {z:>8.3f} "
                 f"{charge:>7.4f} {radius:>7.4f}\n"
             )
             fout.write(pqr_line)
@@ -397,6 +398,9 @@ __all__ = [
 ]
 
 
+_PQR_NUMBER_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
+
+
 def _parse_pqr_atom_line(line: str) -> Dict[str, Any]:
     """
     Parse a PQR atom line into its constituent fields using robust tokenisation.
@@ -414,7 +418,11 @@ def _parse_pqr_atom_line(line: str) -> Dict[str, Any]:
     res_seq = line[22:26].strip()
     i_code = line[26:27]
 
-    numeric_fields = line[30:].split()
+    # PQR coordinates are written in fixed 8-character fields.  A value of
+    # -100.000 or beyond fills the field exactly, leaving no space before the
+    # next number, so a plain split() merges them ("9.934-100.695").  Pull the
+    # numbers out by pattern instead of relying on whitespace.
+    numeric_fields = _PQR_NUMBER_RE.findall(line[30:])
     if len(numeric_fields) < 5:
         raise ValueError("Failed to parse numeric PQR fields")
 
@@ -528,7 +536,7 @@ def _format_pqr_atom_line(fields: Dict[str, Any], radius: float) -> str:
 
     return (
         f"{record:<6}{serial_field} {name_field}{alt_loc}{res_name_field} {chain_field}"
-        f"{res_seq_field}{i_code}   {x:>8.3f}{y:>8.3f}{z:>8.3f} {charge:>8.4f} {radius:>7.4f}\n"
+        f"{res_seq_field}{i_code}   {x:>8.3f} {y:>8.3f} {z:>8.3f} {charge:>8.4f} {radius:>7.4f}\n"
     )
 
 
@@ -552,6 +560,13 @@ def _rewrite_pqr_with_custom_radii(
             try:
                 fields = _parse_pqr_atom_line(line)
             except ValueError:
+                # Passing the line through unchanged keeps a malformed record
+                # in the output, where it surfaces much later as an opaque
+                # parser error from whoever reads the file next.
+                logger.warning(
+                    "Could not parse PQR atom line; copying it through "
+                    "unchanged: %s", line.rstrip()
+                )
                 fout.write(line)
                 continue
 
