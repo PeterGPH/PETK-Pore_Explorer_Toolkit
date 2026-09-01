@@ -508,7 +508,10 @@ def _format_res_seq_field(res_seq: str) -> str:
     seq = res_seq.strip()
     if len(seq) > 4:
         seq = seq[-4:]
-    return f"{seq:>4}" if seq else "   1"
+    # Width 5, not 4: a 4-digit residue number (waters are routinely numbered
+    # 2001+) would otherwise butt straight against the chain column and merge
+    # with it -- "X2001" reads as a single token.
+    return f"{seq:>5}" if seq else "    1"
 
 
 def _format_pqr_atom_line(fields: Dict[str, Any], radius: float) -> str:
@@ -522,8 +525,12 @@ def _format_pqr_atom_line(fields: Dict[str, Any], radius: float) -> str:
     if not alt_loc or alt_loc == "":
         alt_loc = " "
     res_name_field = f"{fields['res_name'].strip()[:3]:>3}"
-    chain_value = (fields.get("chain_id") or "").strip() or "X"
-    chain_field = chain_value[:1]
+    # Do NOT invent a chain ID.  pdb2pqr omits the column entirely, and
+    # substituting "X" turns a 10-field line into an 11-field one -- mixing
+    # the two within a file breaks any reader that infers the field count
+    # from the first line (MDAnalysis does exactly that).
+    chain_value = (fields.get("chain_id") or "").strip()
+    chain_field = chain_value[:1] if chain_value else " "
     res_seq_field = _format_res_seq_field(fields.get("res_seq", ""))
     i_code = fields.get("i_code", " ")
     if not i_code or i_code == "":
