@@ -9,7 +9,7 @@ abstract: >
 authors:
   - name: "SEM Development Team"
     email: "pinhao2@illinois.edu"
-version: "0.1.0"
+version: "0.2.0"
 date-released: "2026-04-29"
 license: MIT
 repository-code: "https://github.com/PeterGPH/PETK-Pore_Explorer_Toolkit"
