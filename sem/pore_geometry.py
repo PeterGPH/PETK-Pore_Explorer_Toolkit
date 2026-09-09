@@ -254,6 +254,108 @@ class ConicalPore(BasePore):
         return self._interpolator
 
 
+class EllipticalPore(BasePore):
+    """Straight pore with an ELLIPTICAL cross-section (semi-axes a, b).
+
+    Unlike the other analytic pores this is not a surface of revolution, so the
+    constriction is anisotropic in the xy-plane. ``a == b`` reduces exactly to
+    :class:`CylindricalPore` with ``pore_radius = a``.
+
+    Limitations
+    -----------
+    No corner chamfer. ``CylindricalPore`` accepts ``corner_radius`` and rounds
+    the pore mouth; this class has sharp corners. Verified end-to-end:
+    ``elliptical(a=b=25)`` gives 2.176554 nA, identical to
+    ``cylindrical(pore_radius=25, corner_radius=0)``, while the same cylinder
+    with ``corner_radius=5`` gives 2.353300 nA. Configs carried over from the
+    circular pores will therefore not reproduce their open-pore current unless
+    the chamfer is also removed.
+
+    Distance to the wall
+    --------------------
+    ``_distance_to_membrane`` needs the perpendicular distance from a grid point
+    to the pore wall. For a circle that is ``pore_radius - R``. For an ellipse
+    the exact distance is the root of a quartic per point, which is far too slow
+    for the ~1e6 grid points evaluated per solve.
+
+    We use the first-order level-set linearisation. With
+
+        G(x, y) = sqrt((x/a)^2 + (y/b)^2)        (the wall is G = 1)
+
+    the perpendicular distance to the boundary is
+
+        d ~= (1 - G) / |grad G| = (1 - G) * G / sqrt(x^2/a^4 + y^2/b^4)
+
+    This is EXACT for a == b (G = r/a, |grad G| = 1/a, so d = a - r) and is
+    accurate near the wall, which is the region ``condfrac`` is sensitive to. It
+    degrades toward the axis where grad G vanishes, so points near the axis are
+    handled separately: there the true distance is min(a, b).
+    """
+
+    # Below this |grad G| the linearisation is unusable; such points are near
+    # the axis and deep in the bulk, where conductivity is flat anyway.
+    _GRAD_FLOOR = 1e-12
+
+    def __init__(self, X, Y, Z, semi_axis_a, semi_axis_b, membrane_half_thickness,
+                 bulk_conductivity=10.5, membrane_conductivity=0.0001):
+        if semi_axis_a <= 0 or semi_axis_b <= 0:
+            raise ValueError("Elliptical pore requires positive semi_axis_a and semi_axis_b.")
+        if membrane_half_thickness <= 0:
+            raise ValueError("Elliptical pore requires a non-zero membrane thickness.")
+        self.X = X
+        self.Y = Y
+        self.Z = Z
+        self.semi_axis_a = float(semi_axis_a)
+        self.semi_axis_b = float(semi_axis_b)
+        self.membrane_half_thickness = membrane_half_thickness
+        self.bulk_conductivity = bulk_conductivity
+        self.membrane_conductivity = membrane_conductivity
+        self._interpolator = None
+        self._distance_map = None
+
+    def _wall_distance(self):
+        """Perpendicular distance to the elliptical wall; positive inside."""
+        a, b = self.semi_axis_a, self.semi_axis_b
+        G = np.sqrt((self.X / a) ** 2 + (self.Y / b) ** 2)
+        grad = np.sqrt((self.X ** 2) / a ** 4 + (self.Y ** 2) / b ** 4)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            d = (1.0 - G) * G / grad
+        # On the axis grad G -> 0 and the expression is 0/0; the exact distance
+        # to the ellipse from the centre is min(a, b).
+        d = np.where(grad > self._GRAD_FLOOR, d, min(a, b))
+        return d
+
+    def get_conductivity_interpolator(self):
+        if self._interpolator is None:
+            # _distance_to_membrane expects (R, local_radius) and forms
+            # max(local_radius - R, 0). Feed it the perpendicular wall distance
+            # directly as `local_radius` with R = 0, which yields the same
+            # max(d, 0) while letting the ellipse define d.
+            d_wall = self._wall_distance()
+            distance_map = _distance_to_membrane(
+                np.zeros_like(d_wall),
+                np.abs(self.Z),
+                d_wall,
+                self.membrane_half_thickness,
+            )
+            self._distance_map = distance_map
+            conductivity_grid = _conductivity_from_distance(
+                distance_map,
+                self.bulk_conductivity,
+                self.membrane_conductivity,
+            )
+
+            x_range = np.unique(self.X[:, 0, 0])
+            y_range = np.unique(self.Y[0, :, 0])
+            z_range = np.unique(self.Z[0, 0, :])
+
+            self._interpolator = RegularGridInterpolator(
+                (x_range, y_range, z_range), conductivity_grid,
+                bounds_error=False, fill_value=self.bulk_conductivity
+            )
+        return self._interpolator
+
+
 class BinFilePore(BasePore):
     def __init__(self, bin_file_path, base_sigma, mask_radius=-1, data_units="distance"):
         logger.info(f"Loading pore structure from binary file: {bin_file_path}")
@@ -892,6 +994,8 @@ class PoreGeometry:
             return DoubleConePore(X, Y, Z, **kwargs)
         elif pore_type == "conical":
             return ConicalPore(X, Y, Z, **kwargs)
+        elif pore_type == "elliptical":
+            return EllipticalPore(X, Y, Z, **kwargs)
         elif pore_type == "bin_file":
             return BinFilePore(**kwargs)
         elif pore_type == "biological":

@@ -65,7 +65,8 @@ def validate_config(config, require_analyte=True):
     
     # Validate pore type
     pore_type = config["pore_geometry"].get("pore_type", "").lower()
-    valid_pore_types = ["cylindrical", "double_cone", "conical", "biological", "bin_file"]
+    valid_pore_types = ["cylindrical", "double_cone", "conical", "elliptical",
+                        "biological", "bin_file"]
     
     if pore_type not in valid_pore_types:
         logger.error(f"Invalid pore_type: {pore_type}. Must be one of: {valid_pore_types}")
@@ -85,6 +86,24 @@ def validate_config(config, require_analyte=True):
         outer_radius = config["pore_geometry"].get("outer_radius", pore_radius * 1.5)
         if outer_radius <= pore_radius:
             logger.error("For double_cone pore, outer_radius must be greater than pore_radius")
+            return False
+
+    if pore_type == "elliptical":
+        semi_a = config["pore_geometry"].get("semi_axis_a")
+        semi_b = config["pore_geometry"].get("semi_axis_b")
+        if semi_a is None or semi_b is None:
+            logger.error(
+                "For elliptical pore, both semi_axis_a and semi_axis_b must be provided"
+            )
+            return False
+        try:
+            semi_a = float(semi_a)
+            semi_b = float(semi_b)
+        except (TypeError, ValueError):
+            logger.error("elliptical semi_axis_a and semi_axis_b must be numeric")
+            return False
+        if semi_a <= 0 or semi_b <= 0:
+            logger.error("elliptical semi_axis_a and semi_axis_b must be > 0")
             return False
 
     if pore_type == "conical":
