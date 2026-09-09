@@ -160,6 +160,9 @@ def make_sem_config(
     output_prefix: str,
     box_padding_factor: float = 3.0,
     D_nm: Optional[float] = None,
+    corner_radius_nm: float = 0.0,
+    chamfer_depth_nm: Optional[float] = None,
+    distance_metric: str = "euclidean",
     fixed_box_nm: Optional[float] = None,
     fixed_z_box_nm: Optional[float] = None,
     mesh_engine: Optional[str] = None,
@@ -186,10 +189,30 @@ def make_sem_config(
       fit (radial: pore_widest/2 must be < edge/2; vertical: L/2 must be <
       edge/2). Use this when you want the box-truncation bias to be visible
       and to vary with d in a controlled way.
+
+    ``geometry`` accepts ``"cylindrical"``, ``"double_cone"`` (both as
+    before), plus two additions so the corner-smoothed-cylinder and
+    single-cone analytical-validation series (Fig. 3 B/D) can be
+    regenerated from this repo:
+
+    * ``"cylindrical_corner"`` — a cylinder with a rounded/chamfered corner
+      (``corner_radius_nm``, ``chamfer_depth_nm``; the latter defaults to
+      ``corner_radius_nm`` when omitted, matching SEM's own default).
+    * ``"conical"`` — a single frustum, reusing the same ``D_nm`` taper
+      convention as ``double_cone`` (bottom radius ``d_nm/2``, top radius
+      ``D_nm/2``).
+
+    ``distance_metric`` ("euclidean", the default, or "legacy") is always
+    written into the geometry block, mirroring how ``sem.config`` and
+    ``sem.cli`` always emit it explicitly. Since "euclidean" is also
+    ``VerticalMovementSEM``'s own default, passing the default here leaves
+    every existing (no-corner) run's computed output unchanged.
     """
     radius_A = (d_nm / 2.0) * 10.0
     thickness_A = l_nm * 10.0
     pore_widest_nm = max(d_nm, D_nm or d_nm)
+    if geometry == "cylindrical_corner":
+        pore_widest_nm = max(pore_widest_nm, d_nm + 2.0 * corner_radius_nm)
 
     if fixed_box_nm is not None:
         half_edge_nm = fixed_box_nm / 2.0
@@ -226,17 +249,29 @@ def make_sem_config(
             half_box_z_A = (fixed_z_box_nm / 2.0) * 10.0
         else:
             half_box_z_A = (l_nm / 2.0 + effective_pad_nm) * 10.0
-    geom = {"membrane_thickness": thickness_A}
+    geom = {"membrane_thickness": thickness_A, "distance_metric": distance_metric}
     if geometry == "cylindrical":
         geom["pore_type"] = "cylindrical"
         geom["pore_radius"] = radius_A
         geom["corner_radius"] = 0.0
+    elif geometry == "cylindrical_corner":
+        geom["pore_type"] = "cylindrical"
+        geom["pore_radius"] = radius_A
+        geom["corner_radius"] = corner_radius_nm * 10.0
+        if chamfer_depth_nm is not None:
+            geom["chamfer_depth"] = chamfer_depth_nm * 10.0
     elif geometry == "double_cone":
         if D_nm is None:
             raise ValueError("double_cone requires D_nm")
         geom["pore_type"] = "double_cone"
         geom["pore_radius"] = radius_A
         geom["outer_radius"] = (D_nm / 2.0) * 10.0
+    elif geometry == "conical":
+        if D_nm is None:
+            raise ValueError("conical requires D_nm")
+        geom["pore_type"] = "conical"
+        geom["bottom_radius"] = radius_A
+        geom["top_radius"] = (D_nm / 2.0) * 10.0
     else:
         raise ValueError(f"Unsupported geometry: {geometry}")
     simulation = {
@@ -412,7 +447,12 @@ def run_sweep(args: argparse.Namespace) -> List[SweepResult]:
         for d_nm in diameters:
             D_nm = kowalczyk_taper_D_nm(d_nm, args.taper_nm)
             for geometry in args.geometries:
-                widest = D_nm if geometry == "double_cone" else d_nm
+                if geometry in ("double_cone", "conical"):
+                    widest = D_nm
+                elif geometry == "cylindrical_corner":
+                    widest = d_nm + 2.0 * args.corner_radius_nm
+                else:
+                    widest = d_nm
                 if widest / 2.0 >= half_edge_nm:
                     bad.append(
                         f"  d={d_nm:.1f} nm, {geometry}: widest radius "
@@ -459,7 +499,10 @@ def run_sweep(args: argparse.Namespace) -> List[SweepResult]:
                     box_padding_nm=args.box_padding_nm,
                     box_padding_factor=args.box_padding_factor,
                     output_prefix=f"open_pore_{geometry}_d{int(round(d_nm))}",
-                    D_nm=D_nm if geometry == "double_cone" else None,
+                    D_nm=D_nm if geometry in ("double_cone", "conical") else None,
+                    corner_radius_nm=args.corner_radius_nm,
+                    chamfer_depth_nm=args.chamfer_depth_nm,
+                    distance_metric=args.distance_metric,
                     fixed_box_nm=args.fixed_box_nm,
                     fixed_z_box_nm=args.fixed_z_box_nm,
                     mesh_engine=args.mesh_engine,
@@ -611,9 +654,23 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--taper-nm", type=float, default=20.0,
                    help="Empirical D − d (nm) for the hourglass bracket.")
     p.add_argument("--geometries", nargs="+",
-                   choices=["cylindrical", "double_cone"],
+                   choices=["cylindrical", "cylindrical_corner", "double_cone", "conical"],
                    default=["cylindrical", "double_cone"],
-                   help="Which SEM geometries to run.")
+                   help="Which SEM geometries to run. 'cylindrical_corner' and "
+                        "'conical' (Fig. 3 B/D series) additionally honor "
+                        "--corner-radius-nm/--chamfer-depth-nm and reuse the "
+                        "--taper-nm-derived D for the top radius, respectively.")
+    p.add_argument("--distance-metric", choices=["euclidean", "legacy"],
+                   default="euclidean",
+                   help="Parametric-pore wall-distance convention (default: "
+                        "euclidean, the true 3-D wall distance). 'legacy' is "
+                        "the original radial+vertical approximation.")
+    p.add_argument("--corner-radius-nm", type=float, default=0.0,
+                   help="Corner radius (nm) for --geometries cylindrical_corner.")
+    p.add_argument("--chamfer-depth-nm", type=float, default=None,
+                   help="Chamfer axial depth (nm) for --geometries "
+                        "cylindrical_corner. Defaults to --corner-radius-nm "
+                        "when omitted (SEM's own default).")
     p.add_argument("--with-sem", action="store_true",
                    help="Actually run SEM open_pore for each diameter.")
     p.add_argument("--conda-env", default="",

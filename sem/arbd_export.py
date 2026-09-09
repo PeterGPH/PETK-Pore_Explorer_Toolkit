@@ -43,6 +43,8 @@ from typing import Iterable, Optional, Sequence
 
 import numpy as np
 
+from .geometry_profiles import PoreProfile
+
 logger = logging.getLogger(__name__)
 
 
@@ -205,7 +207,10 @@ def _membrane_mask(sem_instance, grid_points):
     """Boolean mask: True where the membrane material is.
 
     Uses ``base_dist_interp`` when present (treats distance<=0 as inside wall);
-    otherwise builds an analytic mask from pore geometry parameters.
+    otherwise builds an analytic mask from pore geometry parameters via the
+    same ``PoreProfile`` wall representation the parametric pores use, so
+    ``profile`` (and ``chamfer_depth``) get identical semantics to
+    ``cylindrical``/``double_cone``/``conical`` here.
     """
     if getattr(sem_instance, "base_dist_interp", None) is not None:
         d = sem_instance.base_dist_interp(grid_points)
@@ -223,18 +228,24 @@ def _membrane_mask(sem_instance, grid_points):
     abs_z = np.abs(grid_points[:, 2])
     in_slab = abs_z <= half_t
 
-    if pore_type == "cylindrical":
-        return in_slab & (R > float(sem_instance.pore_radius))
-
-    if pore_type == "double_cone":
-        z_frac = np.clip(abs_z / half_t, 0.0, 1.0)
-        local_r = sem_instance.pore_radius + (sem_instance.outer_radius - sem_instance.pore_radius) * z_frac
-        return in_slab & (R > local_r)
-
-    if pore_type == "conical":
-        signed_z = grid_points[:, 2]
-        t = np.clip((signed_z + half_t) / (2.0 * half_t), 0.0, 1.0)
-        local_r = sem_instance.bottom_radius + (sem_instance.top_radius - sem_instance.bottom_radius) * t
+    if pore_type in ("cylindrical", "double_cone", "conical", "profile"):
+        try:
+            profile = PoreProfile.from_params(
+                pore_type,
+                membrane_thickness=sem_instance.membrane_thickness,
+                pore_radius=getattr(sem_instance, "pore_radius", None),
+                corner_radius=getattr(sem_instance, "corner_radius", 0.0),
+                chamfer_depth=getattr(sem_instance, "chamfer_depth", None),
+                outer_radius=getattr(sem_instance, "outer_radius", None),
+                top_radius=getattr(sem_instance, "top_radius", None),
+                bottom_radius=getattr(sem_instance, "bottom_radius", None),
+                profile_path=getattr(sem_instance, "profile_path", None),
+            )
+        except ValueError:
+            # Missing/invalid parameters for this pore type -- no steric
+            # region can be determined analytically.
+            return np.zeros(len(grid_points), dtype=bool)
+        local_r = profile.local_radius(grid_points[:, 2])
         return in_slab & (R > local_r)
 
     # Fallback: no steric region known.

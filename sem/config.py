@@ -7,6 +7,8 @@ import sys
 import logging
 from pathlib import Path
 
+from .geometry_profiles import PoreProfile
+
 try:
     from mpi4py import MPI
     comm = MPI.COMM_WORLD
@@ -64,32 +66,107 @@ def validate_config(config, require_analyte=True):
             return False
     
     # Validate pore type
-    pore_type = config["pore_geometry"].get("pore_type", "").lower()
-    valid_pore_types = ["cylindrical", "double_cone", "conical", "biological", "bin_file"]
-    
+    pore_geom = config["pore_geometry"]
+    pore_type = pore_geom.get("pore_type", "").lower()
+    valid_pore_types = ["cylindrical", "double_cone", "conical", "profile", "biological", "bin_file"]
+
     if pore_type not in valid_pore_types:
         logger.error(f"Invalid pore_type: {pore_type}. Must be one of: {valid_pore_types}")
         return False
-    
+
+    # membrane_thickness: required; numeric; > 0 (bin_file may be 0.0 --
+    # existing bin_file configs ship with membrane_thickness: 0.0).
+    if "membrane_thickness" not in pore_geom:
+        logger.error("pore_geometry.membrane_thickness is required")
+        return False
+    try:
+        membrane_thickness = float(pore_geom["membrane_thickness"])
+    except (TypeError, ValueError):
+        logger.error("pore_geometry.membrane_thickness must be numeric")
+        return False
+    if pore_type == "bin_file":
+        if membrane_thickness < 0:
+            logger.error("pore_geometry.membrane_thickness must be >= 0 for bin_file")
+            return False
+    elif membrane_thickness <= 0:
+        logger.error("pore_geometry.membrane_thickness must be > 0")
+        return False
+    pore_geom["membrane_thickness"] = membrane_thickness
+
+    # corner_radius: numeric >= 0 (meaningful for cylindrical; default 0.0).
+    corner_radius = pore_geom.get("corner_radius", 0.0)
+    try:
+        corner_radius = float(corner_radius)
+    except (TypeError, ValueError):
+        logger.error("pore_geometry.corner_radius must be numeric")
+        return False
+    if corner_radius < 0:
+        logger.error("pore_geometry.corner_radius must be >= 0")
+        return False
+    pore_geom["corner_radius"] = corner_radius
+
+    # chamfer_depth: None (-> defaults to corner_radius) unless set, in
+    # which case it must be numeric and > 0. Only meaningful for
+    # cylindrical pores; warn (but don't fail) if set otherwise.
+    chamfer_depth = pore_geom.get("chamfer_depth", None)
+    if chamfer_depth is not None:
+        try:
+            chamfer_depth = float(chamfer_depth)
+        except (TypeError, ValueError):
+            logger.error("pore_geometry.chamfer_depth must be numeric")
+            return False
+        if chamfer_depth <= 0:
+            logger.error("pore_geometry.chamfer_depth must be > 0")
+            return False
+        pore_geom["chamfer_depth"] = chamfer_depth
+        if pore_type != "cylindrical":
+            logger.warning(
+                "pore_geometry.chamfer_depth is only meaningful for cylindrical "
+                "pores; pore_type is %r", pore_type,
+            )
+
+    # pore_radius: numeric > 0, for cylindrical / double_cone.
+    if pore_type in ("cylindrical", "double_cone"):
+        pore_radius = pore_geom.get("pore_radius", 100.0)
+        try:
+            pore_radius = float(pore_radius)
+        except (TypeError, ValueError):
+            logger.error("pore_geometry.pore_radius must be numeric")
+            return False
+        if pore_radius <= 0:
+            logger.error("pore_geometry.pore_radius must be > 0")
+            return False
+        pore_geom["pore_radius"] = pore_radius
+
+    # distance_metric: default "euclidean"; lower-cased; euclidean|legacy.
+    distance_metric = str(pore_geom.get("distance_metric", "euclidean")).lower()
+    if distance_metric not in ("euclidean", "legacy"):
+        logger.error(
+            "pore_geometry.distance_metric must be 'euclidean' or 'legacy', got %r",
+            distance_metric,
+        )
+        return False
+    pore_geom["distance_metric"] = distance_metric
+
     # Type-specific validation
-    if pore_type == "biological" and not config["pore_geometry"].get("biological_pore_pdb"):
+    if pore_type == "biological" and not pore_geom.get("biological_pore_pdb"):
         logger.error("For biological pore, biological_pore_pdb must be provided")
         return False
-    
-    if pore_type == "bin_file" and not config["pore_geometry"].get("bin_file_path"):
+
+    if pore_type == "bin_file" and not pore_geom.get("bin_file_path"):
         logger.error("For bin_file pore, bin_file_path must be provided")
         return False
-    
+
     if pore_type == "double_cone":
-        pore_radius = config["pore_geometry"].get("pore_radius", 100.0)
-        outer_radius = config["pore_geometry"].get("outer_radius", pore_radius * 1.5)
+        pore_radius = pore_geom.get("pore_radius", 100.0)
+        outer_radius = pore_geom.get("outer_radius", pore_radius * 1.5)
         if outer_radius <= pore_radius:
             logger.error("For double_cone pore, outer_radius must be greater than pore_radius")
             return False
 
     if pore_type == "conical":
-        top_radius = config["pore_geometry"].get("top_radius")
-        bottom_radius = config["pore_geometry"].get("bottom_radius")
+        top_radius = pore_geom.get("top_radius")
+        bottom_radius = pore_geom.get("bottom_radius")
         if top_radius is None or bottom_radius is None:
             logger.error(
                 "For conical pore, both top_radius and bottom_radius must be provided"
@@ -104,7 +181,23 @@ def validate_config(config, require_analyte=True):
         if top_radius <= 0 or bottom_radius <= 0:
             logger.error("conical top_radius and bottom_radius must be > 0")
             return False
-    
+
+    if pore_type == "profile":
+        profile_path = pore_geom.get("profile_path")
+        if not profile_path:
+            logger.error("For profile pore, profile_path must be provided")
+            return False
+        if not Path(profile_path).is_file():
+            logger.error(f"Profile path not found: {profile_path}")
+            return False
+        try:
+            PoreProfile.from_params(
+                "profile", membrane_thickness=membrane_thickness, profile_path=profile_path
+            )
+        except ValueError as exc:
+            logger.error(f"Invalid profile table {profile_path!r}: {exc}")
+            return False
+
     # Ensure defaults for optional parameters
     sim_section = config.get("simulation", {})
     if "xy_margin" not in sim_section:
@@ -262,13 +355,21 @@ def print_config_summary(config):
         elif pore_geom['pore_type'].lower() == "conical":
             logger.info(f"  Top Radius: {pore_geom.get('top_radius', 'Not specified')} Å")
             logger.info(f"  Bottom Radius: {pore_geom.get('bottom_radius', 'Not specified')} Å")
+            logger.info(f"  Distance Metric: {pore_geom.get('distance_metric', 'euclidean')}")
+        elif pore_geom['pore_type'].lower() == "profile":
+            logger.info(f"  Profile Path: {pore_geom.get('profile_path', 'Not specified')}")
+            logger.info(f"  Distance Metric: {pore_geom.get('distance_metric', 'euclidean')}")
         else:
             logger.info(f"  Pore Radius: {pore_geom.get('pore_radius', 100.0)} Å")
             if pore_geom.get("corner_radius", 0) > 0:
                 logger.info(f"  Corner Radius: {pore_geom['corner_radius']} Å")
+                chamfer_depth = pore_geom.get("chamfer_depth")
+                if chamfer_depth is not None:
+                    logger.info(f"  Chamfer Depth: {chamfer_depth} Å")
             if "outer_radius" in pore_geom:
                 logger.info(f"  Outer Radius: {pore_geom['outer_radius']} Å")
-        
+            logger.info(f"  Distance Metric: {pore_geom.get('distance_metric', 'euclidean')}")
+
         logger.info(f"  Membrane Thickness: {pore_geom['membrane_thickness']} Å")
         
         sim = config["simulation"]
@@ -380,21 +481,32 @@ def create_example_config(pore_type="cylindrical", output_file="example_config.j
             "pore_type": "cylindrical",
             "pore_radius": 100.0,
             "corner_radius": 0.0,
-            "membrane_thickness": 200.0
+            "chamfer_depth": None,
+            "membrane_thickness": 200.0,
+            "distance_metric": "euclidean"
         }
     elif pore_type == "double_cone":
         base_config["pore_geometry"] = {
             "pore_type": "double_cone",
             "pore_radius": 80.0,
             "outer_radius": 120.0,
-            "membrane_thickness": 200.0
+            "membrane_thickness": 200.0,
+            "distance_metric": "euclidean"
         }
     elif pore_type == "conical":
         base_config["pore_geometry"] = {
             "pore_type": "conical",
             "top_radius": 120.0,
             "bottom_radius": 60.0,
-            "membrane_thickness": 200.0
+            "membrane_thickness": 200.0,
+            "distance_metric": "euclidean"
+        }
+    elif pore_type == "profile":
+        base_config["pore_geometry"] = {
+            "pore_type": "profile",
+            "profile_path": "pore_profile.csv",
+            "membrane_thickness": 200.0,
+            "distance_metric": "euclidean"
         }
     elif pore_type == "biological":
         base_config["pore_geometry"] = {
@@ -410,7 +522,7 @@ def create_example_config(pore_type="cylindrical", output_file="example_config.j
             "membrane_thickness": 200.0,
             "bin_file_units": "distance"
         }
-    
+
     with open(output_file, 'w') as f:
         json.dump(base_config, f, indent=2)
     

@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Optional
 
 from .config import load_config, validate_config, print_config_summary, create_example_config
-from .vertical_movement_sem import VerticalMovementSEM, AnalyteOverlapError
+# `VerticalMovementSEM`/`AnalyteOverlapError` transitively import dolfinx
+# (mpi4py, petsc4py, ufl, ...), which only ships via conda-forge. Importing
+# them at module scope would break `import sem.cli` (and therefore
+# `create_sem_from_config`'s argument-parsing-only callers, e.g.
+# `create_config`) in a pip-only environment that never installs dolfinx.
+# Imported lazily where actually needed: inside `create_sem_from_config`
+# and `run_rotation_scan` below.
 from .rotation import (
     rotate_pdb_to_grid_center,
     parse_angle_file,
@@ -44,22 +50,29 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
         sem: VerticalMovementSEM instance
         config: Configuration dictionary (returned for convenience)
     """
+    # `VerticalMovementSEM` transitively imports dolfinx; deferred here so
+    # `sem.cli` stays importable (and `create_config` usable) without it.
+    from .vertical_movement_sem import VerticalMovementSEM
+
     if rank == 0:
         logger.info("Creating SEM instance from configuration...")
-    
+
     # Extract parameters from config
     moving_pdb = config["input"]["moving_pdb"]
-    
+
     # Pore geometry parameters
     pore_geom = config["pore_geometry"]
     pore_type = pore_geom["pore_type"].lower()  # Convert to lowercase
-    
+
     # Common parameters
     pore_radius = pore_geom.get("pore_radius", 100.0)
     membrane_thickness = pore_geom["membrane_thickness"]
-    
+
     # Type-specific parameters
     corner_radius = pore_geom.get("corner_radius", 0.0)
+    chamfer_depth = pore_geom.get("chamfer_depth", None)
+    distance_metric = pore_geom.get("distance_metric", "euclidean")
+    profile_path = pore_geom.get("profile_path", None)
     outer_radius = pore_geom.get("outer_radius", None)
     top_radius = pore_geom.get("top_radius", None)
     bottom_radius = pore_geom.get("bottom_radius", None)
@@ -152,6 +165,9 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
         top_radius=top_radius,
         bottom_radius=bottom_radius,
         corner_radius=corner_radius,
+        chamfer_depth=chamfer_depth,
+        distance_metric=distance_metric,
+        profile_path=profile_path,
         biological_pore_pdb=biological_pore_pdb,
         bin_file_path=bin_file_path,
         mask_radius=mask_radius,
@@ -217,6 +233,9 @@ def _broadcast(obj):
 
 
 def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: Path | None):
+    # Deferred: see the comment on the top-level import removal above.
+    from .vertical_movement_sem import AnalyteOverlapError
+
     if rank == 0:
         logger.info("Starting rotation scan with mode '%s'", args.mode)
 
@@ -464,11 +483,16 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
             hybrid_path, len(hybrid_rows), len(results),
         )
 
-def main():
+def main(argv=None):
     """
     Main function to run SEM with JSON configuration.
     Supports multiple modes: 'run', 'preview_only', 'open_pore', and 'create_config'
     Enhanced to support all pore types including binary files.
+
+    Args:
+        argv: Optional list of command-line arguments (excluding the program
+            name), e.g. ``["create_config", "conical", "-o", "cfg.json"]``.
+            Defaults to ``sys.argv[1:]`` when omitted (normal CLI usage).
     """
     parser = argparse.ArgumentParser(
         description='Run SEM calculation with JSON configuration (supports all pore types including binary files)',
@@ -480,10 +504,13 @@ Examples:
   python -m sem config.json open_pore     # Calculate open pore current only
   python -m sem config.json rotation_scan map.dx angles.txt --samples 10
   python -m sem create_config cylindrical # Create example config file
-  
+  python -m sem derive_geometry ...       # Derive geometry from an all-atom map (see Task 3)
+
 Pore Types:
   - cylindrical: Simple cylindrical pore with optional corner rounding
   - double_cone: Hourglass-shaped pore
+  - conical: Single frustum (asymmetric cone) pore
+  - profile: Pore wall defined by an arbitrary radius-vs-z table (CSV)
   - biological: PDB-based biological pore structure
   - bin_file: Binary file-based pore structure (like original code)
         """
@@ -524,22 +551,52 @@ Pore Types:
     
     # Create config command
     config_parser = subparsers.add_parser('create_config', help='Create example configuration file')
-    config_parser.add_argument('pore_type', choices=['cylindrical', 'double_cone', 'biological', 'bin_file'],
-                              help='Type of pore for example configuration')
+    config_parser.add_argument(
+        'pore_type',
+        choices=['cylindrical', 'double_cone', 'conical', 'biological', 'bin_file', 'profile'],
+        help='Type of pore for example configuration')
     config_parser.add_argument('-o', '--output', default='example_config.json',
                               help='Output filename (default: example_config.json)')
-    
+
+    # Derive-geometry command: fits parametric pore parameters (or a
+    # radius-vs-z profile table) from an all-atom distance/conductivity map.
+    # The implementation (sem.scripts.derive_geometry) arrives in a later
+    # task; this subparser exists now purely for discoverability (--help).
+    # Actual dispatch bypasses argparse below so its own argument parsing
+    # (unknown to this module) is untouched.
+    subparsers.add_parser(
+        'derive_geometry',
+        help='Derive parametric pore parameters (or a profile table) from an all-atom map',
+    )
+
+    raw_argv = list(sys.argv[1:]) if argv is None else list(argv)
+
+    # `derive_geometry` forwards its remaining arguments verbatim to
+    # sem.scripts.derive_geometry.main, whose own CLI is defined in that
+    # (not-yet-existing) module -- so it is dispatched here, before
+    # argparse gets a chance to interpret those arguments itself.
+    if raw_argv and raw_argv[0] == 'derive_geometry':
+        try:
+            from .scripts.derive_geometry import main as derive_geometry_main
+        except ImportError as exc:
+            print(
+                f"Error: 'derive_geometry' is not available: {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return derive_geometry_main(raw_argv[1:])
+
     # Legacy support for old command line format
-    if len(sys.argv) >= 3 and sys.argv[2] in ['run', 'preview_only', 'open_pore']:
+    if len(raw_argv) >= 2 and raw_argv[1] in ['run', 'preview_only', 'open_pore']:
         # Old format: program config.json run
-        args = parser.parse_args([sys.argv[2], sys.argv[1]])
+        args = parser.parse_args([raw_argv[1], raw_argv[0]])
     else:
-        args = parser.parse_args()
-    
+        args = parser.parse_args(raw_argv)
+
     if args.command == 'create_config':
         create_example_config(args.pore_type, args.output)
         return
-    
+
     if args.command is None:
         if rank == 0:
             parser.print_help()
@@ -597,15 +654,25 @@ Pore Types:
                         print(f"Pore radius: {sem.pore_radius:.1f} Å")
                         if sem.corner_radius > 0:
                             print(f"Corner radius: {sem.corner_radius:.1f} Å")
+                            chamfer_depth = sem.chamfer_depth if sem.chamfer_depth is not None else sem.corner_radius
+                            print(f"Chamfer depth: {chamfer_depth:.1f} Å")
                     elif sem.pore_type == "double_cone":
                         print(f"Inner radius: {sem.pore_radius:.1f} Å")
                         print(f"Outer radius: {sem.outer_radius:.1f} Å")
+                    elif sem.pore_type == "conical":
+                        print(f"Top radius: {sem.top_radius:.1f} Å")
+                        print(f"Bottom radius: {sem.bottom_radius:.1f} Å")
+                    elif sem.pore_type == "profile":
+                        print(f"Profile: {sem.profile_path}")
                     elif sem.pore_type == "biological":
                         print(f"Biological pore: {sem.biological_pore_pdb}")
                     elif sem.pore_type == "bin_file":
                         print(f"Binary file: {sem.bin_file_path}")
                         print(f"Binary file units: {sem.bin_file_units}")
-                    
+
+                    if sem.pore_type in ("cylindrical", "double_cone", "conical", "profile"):
+                        print(f"Distance metric: {sem.distance_metric}")
+
                     print(f"Membrane thickness: {sem.membrane_thickness:.1f} Å")
                     print(f"Applied voltage: {sem.voltage*1000:.1f} mV")
                     print(f"Bulk conductivity: {sem.bulk_conductivity:.1f} S/m")
@@ -622,15 +689,25 @@ Pore Types:
                             f.write(f"# Pore radius: {sem.pore_radius:.1f} Angstrom\n")
                             if sem.corner_radius > 0:
                                 f.write(f"# Corner radius: {sem.corner_radius:.1f} Angstrom\n")
+                                chamfer_depth = sem.chamfer_depth if sem.chamfer_depth is not None else sem.corner_radius
+                                f.write(f"# Chamfer depth: {chamfer_depth:.1f} Angstrom\n")
                         elif sem.pore_type == "double_cone":
                             f.write(f"# Inner radius: {sem.pore_radius:.1f} Angstrom\n")
                             f.write(f"# Outer radius: {sem.outer_radius:.1f} Angstrom\n")
+                        elif sem.pore_type == "conical":
+                            f.write(f"# Top radius: {sem.top_radius:.1f} Angstrom\n")
+                            f.write(f"# Bottom radius: {sem.bottom_radius:.1f} Angstrom\n")
+                        elif sem.pore_type == "profile":
+                            f.write(f"# Profile: {sem.profile_path}\n")
                         elif sem.pore_type == "biological":
                             f.write(f"# Biological pore: {sem.biological_pore_pdb}\n")
                         elif sem.pore_type == "bin_file":
                             f.write(f"# Binary file: {sem.bin_file_path}\n")
                             f.write(f"# Binary file units: {sem.bin_file_units}\n")
-                        
+
+                        if sem.pore_type in ("cylindrical", "double_cone", "conical", "profile"):
+                            f.write(f"# Distance metric: {sem.distance_metric}\n")
+
                         f.write(f"# Membrane thickness: {sem.membrane_thickness:.1f} Angstrom\n")
                         f.write(f"# Applied voltage: {sem.voltage*1000:.1f} mV\n")
                         f.write(f"# Bulk conductivity: {sem.bulk_conductivity:.1f} S/m\n")
