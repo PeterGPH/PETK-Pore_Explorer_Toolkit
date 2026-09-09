@@ -108,12 +108,19 @@ def euclidean_distance_to_profile(R, z, vertices, half_thickness):
         seg_sq = _segment_distance_sq(R, z, r0, z0, r1, z1)
         best_sq = np.minimum(best_sq, seg_sq)
 
-    # Face rays z = +-h, R' >= r(+-h). The vertical gap max(|z|-h, 0) is the
-    # same for both faces; computing both and taking the min picks whichever
-    # face radius gives the smaller (correct) radial gap.
-    vertical_gap = np.maximum(np.abs(z) - half_thickness, 0.0)
-    for r_face in (r_lo, r_hi):
+    # Face rays z = +-h, R' >= r(+-h). The nearest point on a face ray is
+    # (R, z_face) when R >= r_face (distance is the plain vertical offset)
+    # or (r_face, z_face) when R < r_face (radial gap and vertical offset
+    # both contribute) -- i.e. sqrt(max(r_face-R,0)**2 + (z-z_face)**2),
+    # with the vertical term the *signed* offset to that face plane, never
+    # clamped to 0. Clamping it (as if the ray only mattered once |z|>h)
+    # is wrong for a non-monotonic wall whose interior is wider than its
+    # mouths: a point deep inside the slab with R >= both mouth radii but
+    # R < the interior local_radius would otherwise get a spurious face
+    # distance of 0 even though it sits in the open bore, not the solid.
+    for r_face, z_face in ((r_lo, -half_thickness), (r_hi, half_thickness)):
         radial_gap = np.maximum(r_face - R, 0.0)
+        vertical_gap = z - z_face
         face_sq = radial_gap ** 2 + vertical_gap ** 2
         best_sq = np.minimum(best_sq, face_sq)
 

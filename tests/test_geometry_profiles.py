@@ -129,6 +129,48 @@ def test_inside_chamfer_solid_is_zero_distance():
 
 
 # ---------------------------------------------------------------------------
+# Regression (fix round 1): a non-monotonic `from_table` wall whose
+# interior bulges wider than its mouths. The face-ray term must use the
+# plain (unclamped) signed vertical offset to the face plane -- clamping
+# it to max(|z|-h, 0) let R >= both mouth radii but R < the interior
+# local_radius spuriously read back as distance 0 (as if inside the
+# solid), even though `inside` correctly says False.
+# ---------------------------------------------------------------------------
+def test_non_monotonic_profile_face_ray_distance_is_not_clamped():
+    # Both mouths (z=-50 and z=+50) have radius 30; the interior bulges out
+    # to radius 80 at z=0. Both wall segments have |slope| = 1 (45 degrees).
+    z_table = np.array([-50.0, 0.0, 50.0])
+    r_table = np.array([30.0, 80.0, 30.0])
+    profile = PoreProfile.from_table(z_table, r_table, half_thickness=50.0)
+
+    # Open bore, R between the mouth radius (30) and the interior local_radius
+    # (80): before the fix this spuriously returned 0.0 (face term clamped to
+    # radial-gap-only). True nearest point is on one of the 45-degree wall
+    # segments; verify against the exact point-to-segment distance.
+    R, z = 70.0, 0.0
+    assert profile.local_radius(np.array([z]))[0] == pytest.approx(80.0)
+    tan_theta = 1.0  # |dr/dz| of both wall segments
+    cos_theta = 1.0 / np.sqrt(1.0 + tan_theta ** 2)
+    expected = (80.0 - R) * cos_theta
+    got = profile.distance(np.array([R]), np.array([z]), metric="euclidean")[0]
+    assert got == pytest.approx(expected)
+    assert got == pytest.approx(np.sqrt(50.0))  # (80-70)*cos(45 deg) = 10/sqrt(2)
+
+    # Inside the bulging solid interior (R >= local_radius(0) == 80): zero.
+    R, z = 85.0, 0.0
+    got = profile.distance(np.array([R]), np.array([z]), metric="euclidean")[0]
+    assert got == 0.0
+
+    # Directly above the top mouth rim (R == top mouth radius exactly): the
+    # radial gap is 0, so the distance is the plain vertical offset to the
+    # face plane, z - h.
+    R, z = 30.0, 60.0
+    got = profile.distance(np.array([R]), np.array([z]), metric="euclidean")[0]
+    assert got == pytest.approx(10.0)
+    assert got == pytest.approx(z - 50.0)
+
+
+# ---------------------------------------------------------------------------
 # 45-degree chamfer: euclidean interior distance is legacy / sqrt(2).
 # ---------------------------------------------------------------------------
 def test_45_degree_chamfer_interior_distance():
