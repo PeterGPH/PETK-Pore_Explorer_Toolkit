@@ -15,7 +15,7 @@ from scipy.spatial import KDTree
 from scipy.interpolate import RegularGridInterpolator
 from abc import ABC, abstractmethod
 
-from .utils import readbinGrid, condfrac
+from .grid_io import readbinGrid, condfrac, invert_condfrac
 from .van_der_waals import VanDerWaalsRadii
 from .conductivity_models import SimpleConductivityModel
 from .structure_preparation import prepare_structure, PreparedStructure
@@ -291,13 +291,8 @@ class BinFilePore(BasePore):
             )
         else:
             # Approximate distance map for radius checks using condfrac inversion.
-            minr = 1.3
-            maxr = 4.1
-            slope = 1.0 / (maxr - minr)
-            int_val = -minr * slope
             fraction = np.clip(calcSig / base_sigma, 0.0, 1.0)
-            approx_distance = (fraction - int_val) / slope
-            approx_distance = np.maximum(approx_distance, 0.0)
+            approx_distance = invert_condfrac(fraction)
             self.distance_interp = RegularGridInterpolator(
                 grid_axes,
                 approx_distance,
