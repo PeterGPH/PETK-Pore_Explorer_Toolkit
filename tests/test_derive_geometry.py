@@ -22,6 +22,16 @@ from sem.grid_io import condfrac, write_binary_file
 GRID_HALF = 40.0
 SPACING = 1.0
 
+# Stable substrings identifying each of the four warnings derive() can emit
+# (see sem/scripts/derive_geometry.py: _axis_symmetry_warnings, the
+# far-field-not-solid check and axis-offset check in derive(), and the
+# core-slope check in fit_cylindrical). Tests match against these rather
+# than the full message so minor wording tweaks don't break them.
+WARNING_OFF_AXIS = "axis offset"
+WARNING_AXES_ASYMMETRIC = "not symmetric about 0"
+WARNING_FAR_FIELD_NOT_SOLID = "far field not solid"
+WARNING_CORE_SLOPE = "core slope"
+
 
 def _make_bin(tmp_path, profile, *, name="pore.bin", dx=0.0, dy=0.0):
     """Build a synthetic .bin distance map from a PoreProfile on a box
@@ -36,6 +46,28 @@ def _make_bin(tmp_path, profile, *, name="pore.bin", dx=0.0, dy=0.0):
     write_binary_file(
         d.transpose(2, 1, 0).astype(np.float32),
         origin=(-GRID_HALF, -GRID_HALF, -GRID_HALF),
+        resolution=SPACING,
+        filename=str(path),
+    )
+    return str(path)
+
+
+def _make_bin_with_origin(tmp_path, profile, origin, *, name="pore.bin"):
+    """Like `_make_bin`, but with an explicit (possibly asymmetric) grid
+    origin -- used to exercise the axis-symmetry warning. The pore itself
+    is still built from raw (x, y) coordinates (i.e. centered at the true
+    zero), so only the *box* is off-center, not the pore."""
+    n = int(round(2 * GRID_HALF / SPACING)) + 1
+    x_coords = origin[0] + np.arange(n) * SPACING
+    y_coords = origin[1] + np.arange(n) * SPACING
+    z_coords = origin[2] + np.arange(n) * SPACING
+    X, Y, Z = np.meshgrid(x_coords, y_coords, z_coords, indexing="ij")
+    R = np.sqrt(X ** 2 + Y ** 2)
+    d = profile.distance(R, Z)
+    path = tmp_path / name
+    write_binary_file(
+        d.transpose(2, 1, 0).astype(np.float32),
+        origin=origin,
         resolution=SPACING,
         filename=str(path),
     )
@@ -189,6 +221,91 @@ def test_derive_off_axis_shift_recovers_offset(tmp_path):
     x0, y0 = result.derivation["axis_offset"]
     assert x0 == pytest.approx(2.0, abs=0.3)
     assert y0 == pytest.approx(0.0, abs=0.3)
+    assert any(WARNING_OFF_AXIS in w for w in result.derivation["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# double_cone per-side asymmetry diagnostic (plan-mandated: fit_double_cone
+# computes it, derive() must carry it into derivation["fit_diagnostics"]).
+# ---------------------------------------------------------------------------
+def test_derive_double_cone_reports_asymmetry_diagnostic(tmp_path):
+    profile = PoreProfile.double_cone(inner_radius=12.0, outer_radius=24.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="dcone_asym.bin")
+
+    result = dg.derive(bin_path, "double_cone")
+
+    asymmetry = result.derivation["fit_diagnostics"]["asymmetry"]
+    assert set(asymmetry) == {"inner", "outer"}
+    assert np.isfinite(asymmetry["inner"])
+    assert np.isfinite(asymmetry["outer"])
+    # A genuinely symmetric double cone should show ~0 asymmetry.
+    assert abs(asymmetry["inner"]) < 0.05
+    assert abs(asymmetry["outer"]) < 0.05
+
+
+def test_derive_double_cone_asymmetric_wall_reports_nonzero_asymmetry(tmp_path):
+    # A single-slope (conical) wall fitted as double_cone is deliberately
+    # asymmetric between the two "sides" straddling z_center -- the
+    # per-side fit should catch that, unlike the symmetric case above.
+    profile = PoreProfile.conical(bottom_radius=10.0, top_radius=18.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="cone_as_dcone.bin")
+
+    result = dg.derive(bin_path, "double_cone")
+
+    asymmetry = result.derivation["fit_diagnostics"]["asymmetry"]
+    assert abs(asymmetry["outer"]) > 1.0
+
+
+# ---------------------------------------------------------------------------
+# Warnings: each of the four documented warnings should actually fire (and
+# only when it should).
+# ---------------------------------------------------------------------------
+def test_derive_centered_cylinder_has_no_warnings(tmp_path):
+    profile = PoreProfile.cylindrical(pore_radius=15.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="centered.bin")
+
+    result = dg.derive(bin_path, "cylindrical")
+
+    assert result.derivation["warnings"] == []
+
+
+def test_derive_asymmetric_axes_warns(tmp_path):
+    # Shift the box origin by +2 A in x only, so the x-axis spans
+    # [-38, 42] -- not symmetric about 0 -- while the pore itself stays at
+    # the true (0, 0) center.
+    profile = PoreProfile.cylindrical(pore_radius=15.0, half_thickness=20.0)
+    origin = (-GRID_HALF + 2.0, -GRID_HALF, -GRID_HALF)
+    bin_path = _make_bin_with_origin(tmp_path, profile, origin, name="asym_axes.bin")
+
+    result = dg.derive(bin_path, "cylindrical")
+
+    assert any(WARNING_AXES_ASYMMETRIC in w for w in result.derivation["warnings"])
+    # The pore itself is still on-axis; the fit should be unaffected.
+    assert result.pore_geometry["pore_radius"] == pytest.approx(15.0, abs=0.05)
+
+
+def test_derive_undersized_box_warns_far_field_not_solid(tmp_path):
+    # far_radius defaults to 0.9 * half box width = 36 A here; a pore wide
+    # enough that its wall's condfrac ramp still reaches past far_radius
+    # deep in the membrane core means the "far field" the box measures is
+    # genuinely not fully solid -- the box is too small for this pore.
+    profile = PoreProfile.cylindrical(pore_radius=38.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="undersized_box.bin")
+
+    result = dg.derive(bin_path, "cylindrical")
+
+    assert any(WARNING_FAR_FIELD_NOT_SOLID in w for w in result.derivation["warnings"])
+
+
+def test_derive_conical_as_cylindrical_warns_core_slope(tmp_path):
+    # A genuinely sloped (conical) wall fitted as a cylinder should trip
+    # the "core slope > 0.02" sanity check.
+    profile = PoreProfile.conical(bottom_radius=10.0, top_radius=18.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="cone_as_cyl.bin")
+
+    result = dg.derive(bin_path, "cylindrical")
+
+    assert any(WARNING_CORE_SLOPE in w for w in result.derivation["warnings"])
 
 
 # ---------------------------------------------------------------------------

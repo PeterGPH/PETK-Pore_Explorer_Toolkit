@@ -659,7 +659,10 @@ def derive(
     # between 0 and 1 over a band of order RAMP_MIN..RAMP_MAX Å straddling
     # each true membrane face regardless of box size -- checking the full
     # f_far < 0.5 mask would flag that ordinary ramp overhang as a false
-    # "far field not solid" positive on every pore.
+    # "far field not solid" positive on every pore. (The notes' literal
+    # "f_far < 0.999" read against the full membrane mask would fire on
+    # every membrane slice; f_far > 0.001 on the face-excluded core is the
+    # intended, non-vacuous reading of that check.)
     core_for_offset = membrane_mask & (np.abs(prof.z - z_center) <= L / 2.0 - face_exclude)
     if np.any(prof.f_far[core_for_offset] > 0.001):
         max_f_far = float(np.max(prof.f_far[core_for_offset]))
@@ -680,6 +683,7 @@ def derive(
     refined_params = None
     residual_rms = None
     final_L = L
+    fit_diagnostics = {}
 
     if pore_type in PARAMETRIC_PORE_TYPES:
         if pore_type == "cylindrical":
@@ -695,6 +699,11 @@ def derive(
         elif pore_type == "double_cone":
             fit_result = fit_double_cone(prof, L, z_center, face_exclude=face_exclude, apex_exclude=apex_exclude)
             params = {"pore_radius": fit_result["pore_radius"], "outer_radius": fit_result["outer_radius"]}
+            if "asymmetry" in fit_result:
+                # Per-side (bottom vs top) fit diagnostic, not a fitted
+                # parameter: report it alongside the residuals rather than
+                # feeding it into params/refine.
+                fit_diagnostics["asymmetry"] = fit_result["asymmetry"]
         else:  # conical
             fit_result = fit_conical(prof, L, z_center, face_exclude=face_exclude)
             params = {"bottom_radius": fit_result["bottom_radius"], "top_radius": fit_result["top_radius"]}
@@ -777,6 +786,7 @@ def derive(
         "axis_offset": [x0, y0],
         "far_radius": prof.far_radius,
         "fit_parameters": params,
+        "fit_diagnostics": fit_diagnostics,
         "refined_parameters": refined_params,
         "residual_rms": residual_rms,
         "predicted_deviation_pct": deviation_pct,
