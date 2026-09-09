@@ -118,6 +118,40 @@ def test_derive_cylindrical_round_trip(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Provenance object in the derivation dict
+# ---------------------------------------------------------------------------
+def test_derive_derivation_includes_provenance(tmp_path):
+    import sem
+    from sem.grid_io import RAMP_MAX, RAMP_MIN
+
+    profile = PoreProfile.cylindrical(pore_radius=15.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="prov.bin")
+
+    result = dg.derive(bin_path, "cylindrical")
+
+    provenance = result.derivation["provenance"]
+    assert provenance["sem_version"] == sem.__version__
+    assert provenance["git_commit"] != ""
+    assert provenance["ramp"] == [RAMP_MIN, RAMP_MAX]
+
+
+def test_main_writes_provenance_into_derivation_json(tmp_path):
+    profile = PoreProfile.cylindrical(pore_radius=15.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="prov_cli.bin")
+    prefix = str(tmp_path / "derived_prov")
+
+    rc = dg.main([bin_path, "--pore-type", "cylindrical", "--output-prefix", prefix])
+    assert rc == 0
+
+    with open(prefix + "_derivation.json") as fh:
+        derivation = json.load(fh)
+
+    assert set(derivation["provenance"]) == {"sem_version", "git_commit", "ramp"}
+    assert isinstance(derivation["provenance"]["ramp"], list)
+    assert len(derivation["provenance"]["ramp"]) == 2
+
+
+# ---------------------------------------------------------------------------
 # Round-trip: double cone
 # ---------------------------------------------------------------------------
 def test_derive_double_cone_round_trip(tmp_path):

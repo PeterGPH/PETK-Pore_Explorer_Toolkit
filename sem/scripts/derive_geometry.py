@@ -63,6 +63,16 @@ try:
 except ImportError:  # pragma: no cover - relative import fallback
     from sem.geometry_profiles import PoreProfile
 
+# `sem.provenance` (git_commit) and `sem.__version__` are dolfinx-free, so
+# importing them here does not compromise this module's own dolfinx-free
+# guarantee (see the module docstring / test_module_source_has_no_dolfinx_or_utils_import).
+try:
+    from .. import __version__ as _SEM_VERSION
+    from ..provenance import git_commit as _git_commit
+except ImportError:  # pragma: no cover - relative import fallback
+    from sem import __version__ as _SEM_VERSION
+    from sem.provenance import git_commit as _git_commit
+
 
 PARAMETRIC_PORE_TYPES = ("cylindrical", "double_cone", "conical")
 PORE_TYPES = PARAMETRIC_PORE_TYPES + ("profile",)
@@ -791,6 +801,11 @@ def derive(
         "residual_rms": residual_rms,
         "predicted_deviation_pct": deviation_pct,
         "warnings": warnings_list,
+        "provenance": {
+            "sem_version": _SEM_VERSION,
+            "git_commit": _git_commit(),
+            "ramp": [RAMP_MIN, RAMP_MAX],
+        },
     }
     if "sigma_min" in meta:
         derivation["inputs"]["sigma_min"] = meta["sigma_min"]

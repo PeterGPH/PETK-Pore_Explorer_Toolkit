@@ -11,7 +11,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from . import __version__ as SEM_VERSION
 from .config import load_config, validate_config, print_config_summary, create_example_config
+from .grid_io import RAMP_MAX, RAMP_MIN
+from .provenance import git_commit as _git_commit
 # `VerticalMovementSEM`/`AnalyteOverlapError` transitively import dolfinx
 # (mpi4py, petsc4py, ufl, ...), which only ships via conda-forge. Importing
 # them at module scope would break `import sem.cli` (and therefore
@@ -36,6 +39,54 @@ except ImportError:
     rank = 0  # Assume serial execution if mpi4py not available
 
 logger = logging.getLogger(__name__)
+
+
+def _open_pore_result_lines(sem, open_current):
+    """
+    Build the full `{prefix}_open_pore_current.txt` file content as a list
+    of lines (every line but the last is a `#`-prefixed comment; the last
+    line is the bare current value). Pure string formatting over `sem`'s
+    public attributes -- no dolfinx import -- so it is unit-testable with a
+    lightweight stand-in object instead of a real (dolfinx-backed)
+    `VerticalMovementSEM` instance. Kept in sync with the console summary
+    printed alongside it in `main()`.
+    """
+    lines = ["# Open pore current calculation results", f"# Pore type: {sem.pore_type}"]
+
+    if sem.pore_type == "cylindrical":
+        lines.append(f"# Pore radius: {sem.pore_radius:.1f} Angstrom")
+        if sem.corner_radius > 0:
+            lines.append(f"# Corner radius: {sem.corner_radius:.1f} Angstrom")
+            chamfer_depth = sem.chamfer_depth if sem.chamfer_depth is not None else sem.corner_radius
+            lines.append(f"# Chamfer depth: {chamfer_depth:.1f} Angstrom")
+    elif sem.pore_type == "double_cone":
+        lines.append(f"# Inner radius: {sem.pore_radius:.1f} Angstrom")
+        lines.append(f"# Outer radius: {sem.outer_radius:.1f} Angstrom")
+    elif sem.pore_type == "conical":
+        lines.append(f"# Top radius: {sem.top_radius:.1f} Angstrom")
+        lines.append(f"# Bottom radius: {sem.bottom_radius:.1f} Angstrom")
+    elif sem.pore_type == "profile":
+        lines.append(f"# Profile: {sem.profile_path}")
+    elif sem.pore_type == "biological":
+        lines.append(f"# Biological pore: {sem.biological_pore_pdb}")
+    elif sem.pore_type == "bin_file":
+        lines.append(f"# Binary file: {sem.bin_file_path}")
+        lines.append(f"# Binary file units: {sem.bin_file_units}")
+
+    if sem.pore_type in ("cylindrical", "double_cone", "conical", "profile"):
+        lines.append(f"# Distance metric: {sem.distance_metric}")
+
+    lines.append(f"# Membrane thickness: {sem.membrane_thickness:.1f} Angstrom")
+    lines.append(f"# Applied voltage: {sem.voltage*1000:.1f} mV")
+    lines.append(f"# Bulk conductivity: {sem.bulk_conductivity:.1f} S/m")
+    lines.append(f"# Grid resolution: {sem.grid_resolution:.1f} Angstrom")
+    lines.append(f"# sem_version: {SEM_VERSION}")
+    lines.append(f"# git_commit: {_git_commit()}")
+    lines.append(f"# ramp: {RAMP_MIN} {RAMP_MAX}")
+    lines.append("# Open_pore_current(nA)")
+    lines.append(f"{open_current:.6e}")
+    return lines
+
 
 def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_override=None):
     """
@@ -678,43 +729,16 @@ Pore Types:
                     print(f"Bulk conductivity: {sem.bulk_conductivity:.1f} S/m")
                     print(f"Grid resolution: {sem.grid_resolution:.1f} Å")
                     print(f"Open pore current: {open_current:.6e} nA")
+                    print(f"SEM version: {SEM_VERSION}")
+                    print(f"Git commit: {_git_commit()}")
+                    print(f"Ramp: {RAMP_MIN}-{RAMP_MAX} Å")
                     print(f"{'='*60}")
-                    
+
                     # Save results to file
                     output_file = f"{sem.output_prefix}_open_pore_current.txt"
                     with open(output_file, 'w') as f:
-                        f.write(f"# Open pore current calculation results\n")
-                        f.write(f"# Pore type: {sem.pore_type}\n")
-                        if sem.pore_type == "cylindrical":
-                            f.write(f"# Pore radius: {sem.pore_radius:.1f} Angstrom\n")
-                            if sem.corner_radius > 0:
-                                f.write(f"# Corner radius: {sem.corner_radius:.1f} Angstrom\n")
-                                chamfer_depth = sem.chamfer_depth if sem.chamfer_depth is not None else sem.corner_radius
-                                f.write(f"# Chamfer depth: {chamfer_depth:.1f} Angstrom\n")
-                        elif sem.pore_type == "double_cone":
-                            f.write(f"# Inner radius: {sem.pore_radius:.1f} Angstrom\n")
-                            f.write(f"# Outer radius: {sem.outer_radius:.1f} Angstrom\n")
-                        elif sem.pore_type == "conical":
-                            f.write(f"# Top radius: {sem.top_radius:.1f} Angstrom\n")
-                            f.write(f"# Bottom radius: {sem.bottom_radius:.1f} Angstrom\n")
-                        elif sem.pore_type == "profile":
-                            f.write(f"# Profile: {sem.profile_path}\n")
-                        elif sem.pore_type == "biological":
-                            f.write(f"# Biological pore: {sem.biological_pore_pdb}\n")
-                        elif sem.pore_type == "bin_file":
-                            f.write(f"# Binary file: {sem.bin_file_path}\n")
-                            f.write(f"# Binary file units: {sem.bin_file_units}\n")
+                        f.write("\n".join(_open_pore_result_lines(sem, open_current)) + "\n")
 
-                        if sem.pore_type in ("cylindrical", "double_cone", "conical", "profile"):
-                            f.write(f"# Distance metric: {sem.distance_metric}\n")
-
-                        f.write(f"# Membrane thickness: {sem.membrane_thickness:.1f} Angstrom\n")
-                        f.write(f"# Applied voltage: {sem.voltage*1000:.1f} mV\n")
-                        f.write(f"# Bulk conductivity: {sem.bulk_conductivity:.1f} S/m\n")
-                        f.write(f"# Grid resolution: {sem.grid_resolution:.1f} Angstrom\n")
-                        f.write(f"# Open_pore_current(nA)\n")
-                        f.write(f"{open_current:.6e}\n")
-                    
                     logger.info(f"Results saved to: {output_file}")
                     logger.info("Open pore current calculation completed successfully!")
                 

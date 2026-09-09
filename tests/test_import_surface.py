@@ -23,8 +23,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_import_surface_without_dolfinx():
-    """sem, sem.grid_io, sem.pore_geometry, sem.config must import cleanly
-    even when dolfinx cannot be imported at all."""
+    """sem, sem.grid_io, sem.pore_geometry, sem.config, sem.cli and
+    sem.scripts.derive_geometry must import cleanly even when dolfinx
+    cannot be imported at all -- this is what makes `sem derive_geometry`
+    and the provenance helper (`sem.provenance.git_commit`, used from both
+    `sem.cli` and `sem.scripts.derive_geometry`) usable in a pip-only
+    environment that never installs the DOLFINx/MPI stack."""
     code = (
         "import sys\n"
         "sys.modules['dolfinx'] = None\n"
@@ -32,6 +36,9 @@ def test_import_surface_without_dolfinx():
         "import sem.grid_io\n"
         "import sem.pore_geometry\n"
         "import sem.config\n"
+        "import sem.provenance\n"
+        "import sem.cli\n"
+        "import sem.scripts.derive_geometry\n"
         "print('IMPORT_SURFACE_OK')\n"
     )
     result = subprocess.run(
