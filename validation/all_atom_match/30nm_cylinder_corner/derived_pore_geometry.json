@@ -1,0 +1,8 @@
+{
+  "pore_type": "cylindrical",
+  "pore_radius": 99.12965704818417,
+  "corner_radius": 46.84022773391995,
+  "chamfer_depth": 48.01554801667434,
+  "membrane_thickness": 197.36372897185362,
+  "distance_metric": "euclidean"
+}

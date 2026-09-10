@@ -1,0 +1,51 @@
+{
+  "metadata": {
+    "generated_by": "PETK GUI",
+    "timestamp": "2025-09-02 12:48:05",
+    "version": "1.0"
+  },
+  "input": {
+    "moving_pdb": "/data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys15nm_cylindrical_system_updated_01182026/centered_monomer.pdb"
+  },
+  "pore_geometry": {
+    "pore_type": "cylindrical",
+    "pore_radius": 49.15031719007214,
+    "corner_radius": 0.0,
+    "chamfer_depth": null,
+    "membrane_thickness": 100.24696137976878,
+    "distance_metric": "euclidean"
+  },
+  "simulation": {
+    "voltage": 500,
+    "bulk_conductivity": 16.60843,
+    "grid_resolution": 1.0,
+    "use_vdw_radii": false,
+    "use_pdb2pqr": true,
+    "default_radius": 1.5,
+    "membrane_conductivity": 1.660843e-07,
+    "xy_margin": 0.0
+  },
+  "movement": {
+    "z_start": 0.0,
+    "z_end": 0.0,
+    "z_step": 20.0
+  },
+  "output": {
+    "output_prefix": "vertical_movement",
+    "preview_frames": 1
+  },
+  "box_dimensions": {
+    "x": [
+      -75.0,
+      75.0
+    ],
+    "y": [
+      -75.0,
+      75.0
+    ],
+    "z": [
+      -75.0,
+      75.0
+    ]
+  }
+}

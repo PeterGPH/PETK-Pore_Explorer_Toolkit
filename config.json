@@ -12,7 +12,9 @@
     "pore_type": "cylindrical",
     "pore_radius": 100.0,
     "corner_radius": 50.0,
-    "membrane_thickness": 200.0
+    "chamfer_depth": null,
+    "membrane_thickness": 200.0,
+    "distance_metric": "euclidean"
   },
   "simulation": {
     "voltage": 500,

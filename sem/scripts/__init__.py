@@ -29,8 +29,7 @@ def check_scripts():
 _scripts_available = check_scripts()
 
 __all__ = [
-    'SCRIPT_DIR', 
-    'PDB2XYZ_SCRIPT', 
-    'GEN_DIST_SCRIPT', 
-    'BIN_COMPARE_SCRIPT'
+    'SCRIPT_DIR',
+    'PDB2XYZ_SCRIPT',
+    'GEN_DIST_SCRIPT',
 ]

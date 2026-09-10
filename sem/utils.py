@@ -3,104 +3,18 @@ Utility functions for SEM calculations.
 Contains helper functions converted to DOLFINx.
 """
 
-import os
 import numpy as np
 import logging
 import dolfinx
 import dolfinx.fem as fem
 import dolfinx.mesh as dmesh
 
+# condfrac/readbinGrid moved to sem.grid_io (numpy-only, no dolfinx
+# dependency) so pore_geometry/grid_io consumers can use them without
+# pulling in dolfinx. Re-exported here for existing callers of sem.utils.
+from .grid_io import condfrac, readbinGrid  # noqa: F401
+
 logger = logging.getLogger(__name__)
-
-def condfrac(invec):
-    """
-    Convert values to conductivity fractions (from original code).
-    Points on line (min,0) (max,1)
-    """
-    minr = 1.3
-    maxr = 4.1
-    slope = 1.0/(maxr-minr)
-    int_val = -minr*slope
-    result = slope*invec + int_val
-    result[result<0] = 0.0000001
-    result[result>1] = 1.0
-    return result
-
-def readbinGrid(name, mask_radius=-1, *, return_metadata=False):
-    """
-    Read binary grid file (from original code).
-    
-    Args:
-        name: Path to binary grid file.
-        mask_radius: Optional radius for masking values.
-        return_metadata: If True, return a metadata dict with origin, spacing, and grid shape.
-    
-    Returns:
-        Tuple containing the 3D values, physical dimensions, grid counts,
-        and optionally metadata about the grid spacing/origin.
-    """
-    if not os.path.isfile(name):
-        print(name+" doesn't exist, EXITING")
-        exit()
-    
-    with open(name, 'rb') as f:
-        val1d = np.fromfile(f, dtype=np.float32)
-
-    if val1d.size < 7:
-        raise ValueError(f"Binary grid file {name} is too small to contain a header")
-
-    resolution = float(val1d[6])
-    if resolution <= 0:
-        raise ValueError(f"Invalid grid spacing ({resolution}) recorded in {name}")
-
-    delta = np.array([resolution, resolution, resolution], dtype=np.float32)
-    origin = np.array([val1d[3], val1d[4], val1d[5]], dtype=np.float32)
-    shape = (
-        int(np.ceil(val1d[0])),
-        int(np.ceil(val1d[1])),
-        int(np.ceil(val1d[2]))
-    )
-
-    expected_values = shape[0] * shape[1] * shape[2]
-    data = val1d[7:]
-
-    if data.size != expected_values:
-        raise ValueError(
-            f"Binary grid {name} contains {data.size} values but expected {expected_values}"
-        )
-
-    val3d = np.reshape(data, shape, order='F')
-    
-    if mask_radius>0:
-        x_ = np.arange(origin[0],origin[0]+shape[0]*delta[0],delta[0])
-        y_ = np.arange(origin[1],origin[1]+shape[1]*delta[1],delta[1])
-        z_ = np.arange(origin[2],origin[2]+shape[2]*delta[2],delta[2])
-        assert len(x_) == val3d.shape[0], "x is wrong size"
-        assert len(y_) == val3d.shape[1], "y is wrong size"
-        assert len(z_) == val3d.shape[2], "z is wrong size"
-        xx,yy,zz = np.meshgrid(x_,y_,z_, indexing='ij')
-
-        msk = xx*xx+yy*yy>mask_radius*mask_radius
-        val3d[msk] = 0.00001
-        
-    L = delta[0]*shape[0]; W = delta[1]*shape[1]; H = delta[2]*shape[2]
-    nx = int(shape[0])
-    ny = int(shape[1])
-    nz = int(shape[2])
-    Lm = L-delta[0]
-    Wm = W-delta[1]
-    Hm = H-delta[2]
-
-    if return_metadata:
-        metadata = {
-            "origin": origin,
-            "spacing": delta,
-            "grid_shape": shape,
-            "resolution": resolution,
-        }
-        return val3d, [Lm,Wm,Hm], [nx,ny,nz], metadata
-
-    return val3d, [Lm,Wm,Hm], [nx,ny,nz]
 
 def _safe_attr(obj, name):
     if obj is None or not hasattr(obj, name):

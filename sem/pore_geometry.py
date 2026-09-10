@@ -1,6 +1,6 @@
 """
 Pore geometry classes and functions.
-Handles different pore types: cylindrical, conical, double_cone, biological, and bin_file.
+Handles different pore types: cylindrical, conical, double_cone, profile, biological, and bin_file.
 """
 
 import numpy as np
@@ -15,7 +15,8 @@ from scipy.spatial import KDTree
 from scipy.interpolate import RegularGridInterpolator
 from abc import ABC, abstractmethod
 
-from .utils import readbinGrid, condfrac
+from .grid_io import readbinGrid, condfrac, invert_condfrac
+from .geometry_profiles import PoreProfile, legacy_distance
 from .van_der_waals import VanDerWaalsRadii
 from .conductivity_models import SimpleConductivityModel
 from .structure_preparation import prepare_structure, PreparedStructure
@@ -30,17 +31,6 @@ def _conductivity_from_distance(distance_map, bulk_conductivity, membrane_conduc
     """
     fraction = condfrac(distance_map)
     return membrane_conductivity + fraction * (bulk_conductivity - membrane_conductivity)
-
-def _distance_to_membrane(R, abs_Z, local_radius, membrane_half_thickness):
-    """
-    Analytic distance to the solid membrane defined by:
-      R >= local_radius  and  |Z| <= membrane_half_thickness.
-    Outside this region we compute Euclidean distance to the allowed set,
-    matching the notion of the distance transform produced by gen_dist.
-    """
-    radial_term = np.maximum(local_radius - R, 0.0)
-    vertical_term = np.maximum(abs_Z - membrane_half_thickness, 0.0)
-    return np.sqrt(radial_term**2 + vertical_term**2)
 
 class BasePore(ABC):
     """
@@ -72,126 +62,98 @@ class BasePore(ABC):
         """Return representative grid spacing in Å if defined."""
         return None
 
-class CylindricalPore(BasePore):
-    def __init__(self, X, Y, Z, pore_radius, membrane_half_thickness, 
-                 corner_radius=None, chamfer_depth=None, 
-                 bulk_conductivity=10.5, membrane_conductivity=0.0001):
+class ParametricPore(BasePore):
+    """
+    Base class for every analytic (non-atomistic) pore shape: cylindrical,
+    double_cone, conical, and profile. Holds the sample grid and a
+    `PoreProfile` (the axisymmetric wall polyline) and turns it into a
+    conductivity interpolator via the shared condfrac ramp.
+
+    Subclasses only need to build `self.profile` (a `PoreProfile`) in their
+    `__init__` and call `super().__init__(...)`.
+    """
+
+    def __init__(self, X, Y, Z, profile, *, bulk_conductivity=10.5,
+                 membrane_conductivity=0.0001, distance_metric="euclidean"):
+        if distance_metric not in ("euclidean", "legacy"):
+            raise ValueError(
+                f"distance_metric must be 'euclidean' or 'legacy', got {distance_metric!r}"
+            )
         self.X = X
         self.Y = Y
         self.Z = Z
+        self.profile = profile
+        self.bulk_conductivity = bulk_conductivity
+        self.membrane_conductivity = membrane_conductivity
+        self.distance_metric = distance_metric
+        self._interpolator = None  # Lazy
+        logger.info("Parametric pore wall distance metric: %s", self.distance_metric)
+
+    def compute_distance_map(self):
+        R = np.sqrt(self.X ** 2 + self.Y ** 2)
+        return self.profile.distance(R, self.Z, metric=self.distance_metric)
+
+    def get_conductivity_interpolator(self):
+        if self._interpolator is None:
+            distance_map = self.compute_distance_map()
+            conductivity_grid = _conductivity_from_distance(
+                distance_map,
+                self.bulk_conductivity,
+                self.membrane_conductivity,
+            )
+
+            x_range = np.unique(self.X[:, 0, 0])
+            y_range = np.unique(self.Y[0, :, 0])
+            z_range = np.unique(self.Z[0, 0, :])
+
+            self._interpolator = RegularGridInterpolator(
+                (x_range, y_range, z_range), conductivity_grid,
+                bounds_error=False, fill_value=self.bulk_conductivity
+            )
+        return self._interpolator
+
+
+class CylindricalPore(ParametricPore):
+    def __init__(self, X, Y, Z, pore_radius, membrane_half_thickness,
+                 corner_radius=None, chamfer_depth=None,
+                 bulk_conductivity=10.5, membrane_conductivity=0.0001,
+                 distance_metric="euclidean"):
         self.pore_radius = pore_radius
         self.membrane_half_thickness = membrane_half_thickness
         self.corner_radius = corner_radius
         self.chamfer_depth = chamfer_depth
-        self.bulk_conductivity = bulk_conductivity
-        self.membrane_conductivity = membrane_conductivity
-        self._interpolator = None  # Lazy
-        self._local_pore_radius = None
-
-    def _compute_local_pore_radius(self):
-        base_radius = np.full_like(self.Z, self.pore_radius, dtype=float)
-        if self.corner_radius is None or self.corner_radius <= 0:
-            return base_radius
-
-        chamfer_depth = self.chamfer_depth if self.chamfer_depth is not None else self.corner_radius
-        if chamfer_depth is None or chamfer_depth <= 0:
-            return base_radius
-
-        edge_radius = self.pore_radius + self.corner_radius
-        z_edge_dist = np.maximum(self.membrane_half_thickness - np.abs(self.Z), 0.0)
-        in_chamfer_zone = z_edge_dist < chamfer_depth
-        chamfer_progress = np.zeros_like(self.Z, dtype=float)
-        chamfer_progress[in_chamfer_zone] = np.clip(
-            z_edge_dist[in_chamfer_zone] / chamfer_depth, 0.0, 1.0
+        profile = PoreProfile.cylindrical(
+            pore_radius, membrane_half_thickness,
+            corner_radius=corner_radius if corner_radius is not None else 0.0,
+            chamfer_depth=chamfer_depth,
+        )
+        super().__init__(
+            X, Y, Z, profile,
+            bulk_conductivity=bulk_conductivity,
+            membrane_conductivity=membrane_conductivity,
+            distance_metric=distance_metric,
         )
 
-        local_radius = np.where(
-            in_chamfer_zone,
-            edge_radius + (self.pore_radius - edge_radius) * chamfer_progress,
-            base_radius,
-        )
-        return local_radius
-    
-    def get_conductivity_interpolator(self):
-        if self._interpolator is None:
-            R = np.sqrt(self.X**2 + self.Y**2)
-            local_pore_radius = self._compute_local_pore_radius()
-            self._local_pore_radius = local_pore_radius
 
-            distance_map = _distance_to_membrane(
-                R,
-                np.abs(self.Z),
-                local_pore_radius,
-                self.membrane_half_thickness,
-            )
-            conductivity_grid = _conductivity_from_distance(
-                distance_map,
-                self.bulk_conductivity,
-                self.membrane_conductivity,
-            )
-            
-            # Extract edges
-            x_range = np.unique(self.X[:, 0, 0])
-            y_range = np.unique(self.Y[0, :, 0])
-            z_range = np.unique(self.Z[0, 0, :])
-            
-            self._interpolator = RegularGridInterpolator(
-                (x_range, y_range, z_range), conductivity_grid,
-                bounds_error=False, fill_value=self.bulk_conductivity
-            )
-        return self._interpolator
-
-class DoubleConePore(BasePore):
-    def __init__(self, X, Y, Z, inner_radius, outer_radius, membrane_half_thickness, 
-                 bulk_conductivity=10.5, membrane_conductivity=0.0001):
-        self.X = X
-        self.Y = Y
-        self.Z = Z
+class DoubleConePore(ParametricPore):
+    def __init__(self, X, Y, Z, inner_radius, outer_radius, membrane_half_thickness,
+                 bulk_conductivity=10.5, membrane_conductivity=0.0001,
+                 distance_metric="euclidean"):
+        if membrane_half_thickness <= 0:
+            raise ValueError("Double-cone pores require a non-zero membrane thickness.")
         self.inner_radius = inner_radius
         self.outer_radius = outer_radius
         self.membrane_half_thickness = membrane_half_thickness
-        self.bulk_conductivity = bulk_conductivity
-        self.membrane_conductivity = membrane_conductivity
-        self._interpolator = None  # Lazy
-    
-    def get_conductivity_interpolator(self):
-        if self._interpolator is None:
-            R = np.sqrt(self.X**2 + self.Y**2)
-            abs_z = np.abs(self.Z)
-            if self.membrane_half_thickness <= 0:
-                raise ValueError("Double-cone pores require a non-zero membrane thickness.")
+        profile = PoreProfile.double_cone(inner_radius, outer_radius, membrane_half_thickness)
+        super().__init__(
+            X, Y, Z, profile,
+            bulk_conductivity=bulk_conductivity,
+            membrane_conductivity=membrane_conductivity,
+            distance_metric=distance_metric,
+        )
 
-            z_fraction = np.clip(
-                abs_z / self.membrane_half_thickness,
-                0.0,
-                1.0,
-            )
-            local_pore_radius = self.inner_radius + (self.outer_radius - self.inner_radius) * z_fraction
 
-            distance_map = _distance_to_membrane(
-                R,
-                abs_z,
-                local_pore_radius,
-                self.membrane_half_thickness,
-            )
-            conductivity_grid = _conductivity_from_distance(
-                distance_map,
-                self.bulk_conductivity,
-                self.membrane_conductivity,
-            )
-            
-            # Extract edges
-            x_range = np.unique(self.X[:, 0, 0])
-            y_range = np.unique(self.Y[0, :, 0])
-            z_range = np.unique(self.Z[0, 0, :])
-            
-            self._interpolator = RegularGridInterpolator(
-                (x_range, y_range, z_range), conductivity_grid,
-                bounds_error=False, fill_value=self.bulk_conductivity
-            )
-        return self._interpolator
-
-class ConicalPore(BasePore):
+class ConicalPore(ParametricPore):
     """Single truncated cone (frustum) pore.
 
     Asymmetric about z=0: ``bottom_radius`` at z=-membrane_half_thickness,
@@ -201,57 +163,55 @@ class ConicalPore(BasePore):
     """
 
     def __init__(self, X, Y, Z, top_radius, bottom_radius, membrane_half_thickness,
-                 bulk_conductivity=10.5, membrane_conductivity=0.0001):
+                 bulk_conductivity=10.5, membrane_conductivity=0.0001,
+                 distance_metric="euclidean"):
         if membrane_half_thickness <= 0:
             raise ValueError("Conical pore requires a non-zero membrane thickness.")
         if top_radius <= 0 or bottom_radius <= 0:
             raise ValueError("Conical pore requires positive top_radius and bottom_radius.")
-        self.X = X
-        self.Y = Y
-        self.Z = Z
         self.top_radius = top_radius
         self.bottom_radius = bottom_radius
         self.membrane_half_thickness = membrane_half_thickness
-        self.bulk_conductivity = bulk_conductivity
-        self.membrane_conductivity = membrane_conductivity
-        self._interpolator = None
-        self._local_pore_radius = None
+        profile = PoreProfile.conical(bottom_radius, top_radius, membrane_half_thickness)
+        super().__init__(
+            X, Y, Z, profile,
+            bulk_conductivity=bulk_conductivity,
+            membrane_conductivity=membrane_conductivity,
+            distance_metric=distance_metric,
+        )
 
-    def get_conductivity_interpolator(self):
-        if self._interpolator is None:
-            R = np.sqrt(self.X**2 + self.Y**2)
 
-            # Asymmetric linear interpolation along z (NOT abs(Z) like double_cone).
-            # t = 0 at the bottom face, t = 1 at the top face.
-            t = np.clip(
-                (self.Z + self.membrane_half_thickness) / (2.0 * self.membrane_half_thickness),
-                0.0,
-                1.0,
-            )
-            local_pore_radius = self.bottom_radius + (self.top_radius - self.bottom_radius) * t
-            self._local_pore_radius = local_pore_radius
+class ProfilePore(ParametricPore):
+    """
+    Pore whose wall is given directly as a radius-vs-z table, either as a
+    two-column ``(z, r)`` CSV file (``profile_path``) or as an in-memory
+    ``(z, r)`` array pair (``profile_table``). Lets a derivation tool hand
+    PETK an all-atom-equivalent radius profile directly.
+    """
 
-            distance_map = _distance_to_membrane(
-                R,
-                np.abs(self.Z),
-                local_pore_radius,
-                self.membrane_half_thickness,
-            )
-            conductivity_grid = _conductivity_from_distance(
-                distance_map,
-                self.bulk_conductivity,
-                self.membrane_conductivity,
-            )
-
-            x_range = np.unique(self.X[:, 0, 0])
-            y_range = np.unique(self.Y[0, :, 0])
-            z_range = np.unique(self.Z[0, 0, :])
-
-            self._interpolator = RegularGridInterpolator(
-                (x_range, y_range, z_range), conductivity_grid,
-                bounds_error=False, fill_value=self.bulk_conductivity
-            )
-        return self._interpolator
+    def __init__(self, X, Y, Z, profile_path=None, profile_table=None,
+                 membrane_half_thickness=None,
+                 bulk_conductivity=10.5, membrane_conductivity=0.0001,
+                 distance_metric="euclidean"):
+        if membrane_half_thickness is None or membrane_half_thickness <= 0:
+            raise ValueError("Profile pores require a non-zero membrane_half_thickness.")
+        if profile_path is None and profile_table is None:
+            raise ValueError("Profile pores require profile_path or profile_table.")
+        self.profile_path = profile_path
+        self.profile_table = profile_table
+        self.membrane_half_thickness = membrane_half_thickness
+        profile = PoreProfile.from_params(
+            "profile",
+            membrane_thickness=2.0 * membrane_half_thickness,
+            profile_path=profile_path,
+            profile_table=profile_table,
+        )
+        super().__init__(
+            X, Y, Z, profile,
+            bulk_conductivity=bulk_conductivity,
+            membrane_conductivity=membrane_conductivity,
+            distance_metric=distance_metric,
+        )
 
 
 class BinFilePore(BasePore):
@@ -291,13 +251,8 @@ class BinFilePore(BasePore):
             )
         else:
             # Approximate distance map for radius checks using condfrac inversion.
-            minr = 1.3
-            maxr = 4.1
-            slope = 1.0 / (maxr - minr)
-            int_val = -minr * slope
             fraction = np.clip(calcSig / base_sigma, 0.0, 1.0)
-            approx_distance = (fraction - int_val) / slope
-            approx_distance = np.maximum(approx_distance, 0.0)
+            approx_distance = invert_condfrac(fraction)
             self.distance_interp = RegularGridInterpolator(
                 grid_axes,
                 approx_distance,
@@ -478,7 +433,17 @@ class BiologicalPore(BasePore):
                 max_search_radius = cutoff  # User's modification
                 
                 # Apply translation to match gen_dist.py workflow
-                # gen_dist.py translates atoms by subtracting lower bounds
+                # gen_dist.py translates atoms by subtracting lower bounds;
+                # here the query grid (x_grid/y_grid/z_grid above) is built
+                # centred on (0, 0, 0) rather than starting at the box's
+                # lower corner, so the equivalent translation is by the
+                # centre of that same box (x_min/x_max/... computed above)
+                # rather than by its lower bounds. This brings the box
+                # centre to the origin so the atoms' cell-hash coordinates
+                # line up with the (-Lm/2 .. Lm/2)-centred grid points.
+                center_x = (x_min + x_max) / 2.0
+                center_y = (y_min + y_max) / 2.0
+                center_z = (z_min + z_max) / 2.0
                 center_coords = np.array([center_x, center_y, center_z])
                 translated_pore_positions = pore_positions - center_coords
                 
@@ -811,8 +776,10 @@ class BiologicalPore(BasePore):
             else:
                 conductivity_map = base_conductivity.copy()
             
-            # Apply smooth membrane → bulk transition outside the biological pore interior
-            distance_map = _distance_to_membrane(
+            # Apply smooth membrane → bulk transition outside the biological pore interior.
+            # The per-slice atom-extent radius is noisy and non-convex, so this keeps the
+            # legacy radial+vertical formula (no true-Euclidean reference to match here).
+            distance_map = legacy_distance(
                 R,
                 np.abs(Z_displaced),
                 local_pore_radius_3d,
@@ -892,6 +859,8 @@ class PoreGeometry:
             return DoubleConePore(X, Y, Z, **kwargs)
         elif pore_type == "conical":
             return ConicalPore(X, Y, Z, **kwargs)
+        elif pore_type == "profile":
+            return ProfilePore(X, Y, Z, **kwargs)
         elif pore_type == "bin_file":
             return BinFilePore(**kwargs)
         elif pore_type == "biological":

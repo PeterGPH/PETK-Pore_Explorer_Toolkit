@@ -1,0 +1,9 @@
+system,pore_type,all_atom_nA,param_nA,predicted_dev_pct,commit,env,date
+15nm_cylinder,cylindrical,41.280350,41.133650,-0.0262,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09
+15nm_cylinder_corner,cylindrical,49.505580,49.522750,0.0093,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09
+15nm_double_cone,double_cone,19.775930,19.757670,-0.0510,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09
+30nm_cylinder,cylindrical,88.815920,88.680620,-0.0096,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09
+30nm_cylinder_corner,cylindrical,106.916700,106.959100,0.1239,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09
+30nm_double_cone,double_cone,44.788700,44.797620,-0.0127,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09
+15nm_double_cone_profile,profile,19.775930,19.813980,-0.0238,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09
+30nm_double_cone_profile,profile,44.788700,44.833850,-0.0255,320735f,"sem-env (dolfinx 0.11, PETK worktree)",2026-09-09

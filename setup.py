@@ -4,9 +4,32 @@ Setup script for the SEM package with DOLFINx support and integrated pdb2xyz and
 
 from setuptools import setup, find_packages
 import os
+import re
 
 # Read the contents of README file
 this_directory = os.path.abspath(os.path.dirname(__file__))
+
+
+def _read_version():
+    """
+    Read __version__ from sem/__init__.py by regex rather than importing
+    the package: sem/__init__.py's lazy loader still needs to be
+    importable on its own, but importing it here (before the package is
+    installed) is unnecessary and would tie setup.py's Python to sem's
+    runtime import graph. sem/__init__.py is the single source of truth
+    for the package version.
+    """
+    init_path = os.path.join(this_directory, "sem", "__init__.py")
+    with open(init_path, encoding="utf-8") as f:
+        init_contents = f.read()
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', init_contents, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"Could not find __version__ in {init_path}")
+    return match.group(1)
+
+
+__version__ = _read_version()
+
 try:
     with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
         long_description = f.read()
@@ -92,7 +115,7 @@ extras_require["all"] = sorted(
 
 setup(
     name="nanopore-sem",
-    version="0.1.0",
+    version=__version__,
     author="SEM Development Team",
     author_email="pinhao2@illinois.edu",
     description="Steric Exclusion Model calculations for nanopore analytics with DOLFINx and MPI support",

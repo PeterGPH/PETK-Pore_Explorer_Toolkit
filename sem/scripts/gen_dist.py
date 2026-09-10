@@ -3,7 +3,7 @@
 Python implementation of gen_dist for generating distance fields from XYZ files.
 Equivalent to the C version for cross-platform compatibility.
 
-Usage: python gen_dist.py <xyz_file> <MinX> <MinY> <MinZ> <MaxX> <MaxY> <MaxZ> <Resolution> <cutoff> <OutputFile>
+Usage: python gen_dist.py <xyz_file> <MaxX> <MaxY> <MaxZ> <MinX> <MinY> <MinZ> <Resolution> <cutoff> <OutputFile>
 """
 
 import sys
@@ -14,6 +14,18 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from numba import jit, prange, types
 from numba.typed import List
+
+# write_binary_file moved to sem.grid_io (numpy-only). gen_dist.py is run
+# both as part of the package (`sem.scripts.gen_dist:main`,
+# `python -m sem.scripts.gen_dist`) and as a standalone script invoked
+# directly (`sem.pore_geometry` shells out to it via
+# `[sys.executable, gen_dist_script, ...]`), so a plain relative import
+# would break the direct-script case (no parent package). Fall back to the
+# absolute import there.
+try:
+    from ..grid_io import write_binary_file
+except ImportError:  # pragma: no cover - relative import fallback
+    from sem.grid_io import write_binary_file
 
 class Atom:
     """Atom structure - kept as simple Python class for interface compatibility"""
@@ -292,29 +304,6 @@ def apply_translation(atoms, x_lower, y_lower, z_lower):
     
     return translated_atoms
 
-def write_binary_file(distance_field, origin, resolution, filename):
-    """Write binary file - exact same format as original"""
-    try:
-        with open(filename, 'wb') as f:
-            grid_shape = distance_field.shape
-            x_count = float(grid_shape[2])
-            y_count = float(grid_shape[1])  
-            z_count = float(grid_shape[0])
-            
-            f.write(np.array([x_count], dtype=np.float32).tobytes())
-            f.write(np.array([y_count], dtype=np.float32).tobytes())
-            f.write(np.array([z_count], dtype=np.float32).tobytes())
-            f.write(np.array(origin, dtype=np.float32).tobytes())
-            f.write(np.array([resolution], dtype=np.float32).tobytes())
-            
-            for z in range(grid_shape[0]):
-                slice_data = distance_field[z, :, :].astype(np.float32)
-                f.write(slice_data.tobytes())
-        
-    except Exception as e:
-        print(f"ERROR: Failed to write {filename}: {e}")
-        sys.exit(1)
-
 def generate_binary_distance_field(
     xyz_file,
     x_lower,
@@ -374,7 +363,7 @@ def generate_binary_distance_field(
 def main():
     """Main function - minimal output like original"""
     if len(sys.argv) != 11:
-        print("Usage: python precision_optimized_gen_dist.py <xyz_file> <MinX> <MinY> <MinZ> <MaxX> <MaxY> <MaxZ> <Resolution> <cutoff> <OutputFile>")
+        print("Usage: python precision_optimized_gen_dist.py <xyz_file> <MaxX> <MaxY> <MaxZ> <MinX> <MinY> <MinZ> <Resolution> <cutoff> <OutputFile>")
         sys.exit(1)
     
     xyz_file = sys.argv[1]

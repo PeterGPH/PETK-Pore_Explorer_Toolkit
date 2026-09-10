@@ -57,6 +57,8 @@ try:
 except Exception:  # pragma: no cover — fallback if VdW table is unavailable
     VanDerWaalsRadii = None  # type: ignore[assignment]
 
+from sem.geometry_profiles import PoreProfile
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,8 +85,8 @@ class Pose:
 
 
 # ---------------------------------------------------------------------------
-# Geometry specifications. One dataclass per pore type. Each implements
-# local_radius(z) and reuses _distance_to_membrane.
+# Geometry specifications. One dataclass per pore type. Each builds a
+# `PoreProfile` (the shared analytic wall-distance geometry) on demand.
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class CylindricalSpec:
@@ -92,8 +94,10 @@ class CylindricalSpec:
     membrane_thickness: float   # Å (full thickness, NOT half)
     name: str = "cylindrical"
 
-    def local_radius(self, z: np.ndarray) -> np.ndarray:
-        return np.full_like(z, self.pore_radius, dtype=float)
+    def to_profile(self) -> PoreProfile:
+        return PoreProfile.from_params(
+            "cylindrical", membrane_thickness=self.membrane_thickness, pore_radius=self.pore_radius
+        )
 
 
 @dataclass(frozen=True)
@@ -103,10 +107,11 @@ class DoubleConeSpec:
     membrane_thickness: float   # Å
     name: str = "double_cone"
 
-    def local_radius(self, z: np.ndarray) -> np.ndarray:
-        half = self.membrane_thickness / 2.0
-        z_frac = np.clip(np.abs(z) / half, 0.0, 1.0)
-        return self.inner_radius + (self.outer_radius - self.inner_radius) * z_frac
+    def to_profile(self) -> PoreProfile:
+        return PoreProfile.from_params(
+            "double_cone", membrane_thickness=self.membrane_thickness,
+            pore_radius=self.inner_radius, outer_radius=self.outer_radius,
+        )
 
 
 @dataclass(frozen=True)
@@ -116,26 +121,14 @@ class ConicalSpec:
     membrane_thickness: float   # Å
     name: str = "conical"
 
-    def local_radius(self, z: np.ndarray) -> np.ndarray:
-        half = self.membrane_thickness / 2.0
-        thickness = 2.0 * half
-        # Asymmetric, monotone in *signed* z.
-        t = np.clip((z + half) / thickness, 0.0, 1.0)
-        return self.bottom_radius + (self.top_radius - self.bottom_radius) * t
+    def to_profile(self) -> PoreProfile:
+        return PoreProfile.from_params(
+            "conical", membrane_thickness=self.membrane_thickness,
+            top_radius=self.top_radius, bottom_radius=self.bottom_radius,
+        )
 
 
 GeometrySpec = CylindricalSpec | DoubleConeSpec | ConicalSpec
-
-
-def _distance_to_membrane(
-    R: np.ndarray, abs_z: np.ndarray, local_radius: np.ndarray, half_thickness: float
-) -> np.ndarray:
-    """Same formula as VerticalMovementSEM._distance_to_membrane and
-    pore_geometry._distance_to_membrane. Distance from each atom to the
-    membrane solid; zero means the atom is inside the wall."""
-    radial_term = np.maximum(local_radius - R, 0.0)
-    vertical_term = np.maximum(abs_z - half_thickness, 0.0)
-    return np.sqrt(radial_term ** 2 + vertical_term ** 2)
 
 
 # ---------------------------------------------------------------------------
@@ -161,14 +154,13 @@ def check_pose(
     atom_radii: np.ndarray,
     buffer: float,
     fixed_threshold: Optional[float],
+    distance_metric: str = "euclidean",
 ) -> PoseResult:
     """Run the analytical overlap check for one pose against one geometry."""
-    R = np.sqrt(atom_positions[:, 0] ** 2 + atom_positions[:, 1] ** 2)
+    profile = geometry.to_profile()
     z = atom_positions[:, 2]
-    abs_z = np.abs(z)
-    half = geometry.membrane_thickness / 2.0
-    local_radius = geometry.local_radius(z)
-    distances = _distance_to_membrane(R, abs_z, local_radius, half)
+    distances = profile.distance_xyz(atom_positions, metric=distance_metric)
+    local_radius = profile.local_radius(z)
     if fixed_threshold is not None:
         thresholds = np.full_like(distances, fixed_threshold + buffer)
     else:
@@ -282,6 +274,7 @@ def run_sweep(
     sweep: Sweep,
     buffer: float,
     fixed_threshold: Optional[float],
+    distance_metric: str = "euclidean",
 ) -> List[PoseResult]:
     com = base_positions.mean(axis=0)
     results: List[PoseResult] = []
@@ -294,6 +287,7 @@ def run_sweep(
             atom_radii=radii,
             buffer=buffer,
             fixed_threshold=fixed_threshold,
+            distance_metric=distance_metric,
         )
         results.append(result)
     return results
@@ -454,6 +448,9 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--buffer", type=float, default=0.0, help="Extra clearance added to thresholds (Å).")
     p.add_argument("--fixed-threshold", type=float, default=None,
                    help="Fixed distance threshold per atom (Å). If set, overrides per-atom vdW radii.")
+    p.add_argument("--distance-metric", choices=["euclidean", "legacy"], default="euclidean",
+                   help="Wall-distance metric: 'euclidean' (true 3-D distance, default) or "
+                        "'legacy' (old radial+vertical approximation).")
 
     p.add_argument("--output-dir", type=Path, default=Path("overlap_check_results"))
     p.add_argument("--quiet", action="store_true")
@@ -532,6 +529,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             sweep=sweep,
             buffer=args.buffer,
             fixed_threshold=args.fixed_threshold,
+            distance_metric=args.distance_metric,
         )
         per_geometry_results[geom.name] = results
         summary = summarise(results)

@@ -2201,8 +2201,9 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
         if {[info exists ::PETK::gui::cornerRadius] && [string is double -strict $::PETK::gui::cornerRadius]} {
             append json_content "    \"corner_radius\": $::PETK::gui::cornerRadius,\n"
         }
+        append json_content "    \"distance_metric\": \"euclidean\",\n"
         append json_content "    \"membrane_thickness\": $::PETK::gui::nanoporeThickness\n"
-        
+
     } elseif {$pore_type eq "double_cone"} {
         set inner_diameter $::PETK::gui::innerDiameter
         set outer_diameter $::PETK::gui::outerDiameter
@@ -2216,6 +2217,7 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
         set outer_radius [expr {$outer_diameter / 2.0}]
         append json_content "    \"pore_radius\": $inner_radius,\n"
         append json_content "    \"outer_radius\": $outer_radius,\n"
+        append json_content "    \"distance_metric\": \"euclidean\",\n"
         append json_content "    \"membrane_thickness\": $::PETK::gui::nanoporeThickness\n"
 
     } elseif {$pore_type eq "conical"} {
@@ -2231,6 +2233,7 @@ proc ::PETK::gui::outputParametersToConfig {{output_file ""}} {
         set bottom_radius [expr {$bottom_diameter / 2.0}]
         append json_content "    \"top_radius\": $top_radius,\n"
         append json_content "    \"bottom_radius\": $bottom_radius,\n"
+        append json_content "    \"distance_metric\": \"euclidean\",\n"
         append json_content "    \"membrane_thickness\": $::PETK::gui::nanoporeThickness\n"
 
     } elseif {$pore_type eq "biological"} {

@@ -1,0 +1,6 @@
+{
+  "pore_type": "profile",
+  "profile_path": "validation/all_atom_match/15nm_double_cone_profile/derived_profile_pore.csv",
+  "membrane_thickness": 100.24696137976878,
+  "distance_metric": "euclidean"
+}
