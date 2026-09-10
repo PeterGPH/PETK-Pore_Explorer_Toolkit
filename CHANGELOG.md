@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - For a chamfered cylinder, `double_cone`, or `conical` pore, results
     change by up to a few percent; see `README.md`'s "Distance metric"
     section.
+- The analyte overlap check (`VerticalMovementSEM._assert_radius_overlap`)
+  and the ARBD membrane mask (`arbd_export._membrane_mask`) now both build
+  their wall geometry from the same `PoreProfile` representation used
+  elsewhere, so they honour the configured `distance_metric` and
+  `chamfer_depth` (previously the membrane mask ignored `chamfer_depth`
+  for cylindrical pores and had no `profile` branch at all). Both checks
+  are consequently stricter on sloped or chamfered walls: an analyte pose
+  that passed the overlap check before this change may now raise
+  `AnalyteOverlapError`. Set `pore_geometry.distance_metric: legacy` to
+  restore the old (pre-0.2.0) check.
+- `validate_config` now requires a numeric `pore_geometry.membrane_thickness`
+  for every pore type except `bin_file` (which may still leave it `0.0`),
+  and validates `corner_radius >= 0` and `pore_radius > 0`; a config that
+  previously passed validation with a malformed or missing value in one of
+  these fields now fails validation with a clear error instead.
 - `setup.py`'s package version is now read from `sem/__init__.py`
   (`sem.__version__`) at build time instead of being hardcoded, so
   `sem.__version__`, `setup.py --version`, and `CITATION.cff`'s `version:`
@@ -78,10 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   precision with an explicit sign), replacing hand-transcription of the
   paper's all-atom-vs-parametric comparison table. See
   `validation/all_atom_match/README.md`.
-- `validation/all_atom_match/`: describes the six paper validation systems
-  and the cluster paths to their all-atom `.bin` maps, with an
-  empty-header `results.csv` to be filled in by the cluster validation
-  rerun.
+- `validation/all_atom_match/`: describes the paper validation systems and
+  the cluster paths to their all-atom `.bin` maps, with `results.csv`
+  filled in from the 2026-09-09 cluster validation rerun (8 rows: six base
+  systems plus two `profile`-pore-type re-derivations) and each run's
+  solver log checked in as evidence. See
+  `validation/all_atom_match/README.md`.
 - Provenance lines in `{prefix}_open_pore_current.txt` (both the file and
   the console summary) and in `derive_geometry`'s `*_derivation.json`
   (`provenance` object): `sem_version`, `git_commit` (short SHA, or

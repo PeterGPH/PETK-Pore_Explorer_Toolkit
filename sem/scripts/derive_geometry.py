@@ -408,7 +408,7 @@ def fit_cylindrical(prof, L, z_center, *, face_exclude=5.0, fit_corner=False):
         else:
             corner_radius = 0.0
             chamfer_depth = float(face_exclude)
-        result["corner_radius"] = max(corner_radius, 0.0)
+        result["corner_radius"] = max(corner_radius, 1e-3)
         result["chamfer_depth"] = max(chamfer_depth, 1e-3)
         result["face_band_mask"] = face_band
 

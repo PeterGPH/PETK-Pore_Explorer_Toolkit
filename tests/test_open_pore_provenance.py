@@ -1,17 +1,16 @@
 """
-Unit tests for the provenance helpers in `sem.cli`: `_git_commit` and
-`_open_pore_result_lines`. Both are pure functions (no dolfinx import, no
-real `VerticalMovementSEM` instance required), so they can — and must — be
-exercised without dolfinx: `_open_pore_result_lines` is fed a lightweight
-stand-in object exposing the same public attributes
+Unit tests for the provenance helpers used by `sem.cli`: `_git_commit`
+(imported into `sem.cli` as an alias of `sem.provenance.git_commit`) and
+`_open_pore_result_lines` (defined in `sem.cli`). Both are pure functions
+(no dolfinx import, no real `VerticalMovementSEM` instance required), so
+they can — and must — be exercised without dolfinx: `_open_pore_result_lines`
+is fed a lightweight stand-in object exposing the same public attributes
 `VerticalMovementSEM.calculate_open_pore_current`'s caller reads, instead
 of a real (dolfinx-backed) SEM instance.
 """
 
 import subprocess
 import types
-
-import pytest
 
 from sem.cli import _git_commit, _open_pore_result_lines
 from sem.grid_io import RAMP_MAX, RAMP_MIN

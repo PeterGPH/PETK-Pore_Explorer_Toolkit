@@ -6,7 +6,9 @@ This allows the package to be run with:
     python -m sem config.json preview_only
 """
 
+import sys
+
 from .cli import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

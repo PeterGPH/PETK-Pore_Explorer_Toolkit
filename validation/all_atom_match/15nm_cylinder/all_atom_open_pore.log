@@ -1,0 +1,73 @@
+2026-09-09 18:47:12,415 sem.config: INFO: Loaded configuration from /tmp/claude_runs_binrefs/bin15_sin/config.json
+2026-09-09 18:47:12,415 sem.config: INFO: Configuration validation passed
+2026-09-09 18:47:12,415 sem.config: INFO: Configuration Summary:
+2026-09-09 18:47:12,415 sem.config: INFO:   Input PDB: /data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys15nm_cylindrical_system_updated_01182026/centered_monomer.pdb
+2026-09-09 18:47:12,415 sem.config: INFO:   Pore Type: bin_file
+2026-09-09 18:47:12,415 sem.config: INFO:   Binary File: /data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys15nm_cylindrical_system_updated_01182026/sin_pore/SIN_pore_with_radii.xyz.bin
+2026-09-09 18:47:12,415 sem.config: INFO:   Binary file stores: distance
+2026-09-09 18:47:12,415 sem.config: INFO:   Membrane Thickness: 0.0 Å
+2026-09-09 18:47:12,416 sem.config: INFO:   Voltage: 500 mV
+2026-09-09 18:47:12,416 sem.config: INFO:   Bulk Conductivity: 16.60843 S/m
+2026-09-09 18:47:12,416 sem.config: INFO:   Use VdW Radii: False
+2026-09-09 18:47:12,416 sem.config: INFO:   Use internal PQR prep: True
+2026-09-09 18:47:12,416 sem.config: INFO:   XY Margin: 0.0 Å
+2026-09-09 18:47:12,416 sem.config: INFO:   Mesh Engine: dolfinx
+2026-09-09 18:47:12,416 sem.config: INFO:   Save Mesh XDMF: False
+2026-09-09 18:47:12,416 sem.config: INFO:   Membrane Conductivity: 0.001 S/m
+2026-09-09 18:47:12,416 sem.config: INFO:   Z Range: 20.0 to -20.0 Å
+2026-09-09 18:47:12,416 sem.config: INFO:   Z Step: 1.0 Å
+2026-09-09 18:47:12,416 sem.config: INFO:   Output Prefix: vertical_movement
+2026-09-09 18:47:12,416 sem.config: INFO:   Preview Frames: 1
+2026-09-09 18:47:15,013 sem.cli: INFO: Creating SEM instance from configuration...
+2026-09-09 18:47:15,013 sem.cli: INFO: Using box dimensions from configuration
+2026-09-09 18:47:15,013 sem.vertical_movement_sem: INFO: Bulk conductivity scaled by fixed factor 0.100000 (input 16.6084 S/m → 1.6608 S/m)
+2026-09-09 18:47:15,013 sem.vertical_movement_sem: INFO: Per-position logging disabled (cleanup_temp_files=True). Set cleanup_temp_files=False for detailed output dumps.
+2026-09-09 18:47:15,013 sem.vertical_movement_sem: INFO: Interpreting binary grid values as distance
+2026-09-09 18:47:15,013 sem.vertical_movement_sem: INFO: Skipping analyte preparation (open pore mode)
+2026-09-09 18:47:15,013 sem.vertical_movement_sem: INFO: Creating base conductivity grid for bin_file pore...
+2026-09-09 18:47:15,013 sem.pore_geometry: INFO: Loading pore structure from binary file: /data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys15nm_cylindrical_system_updated_01182026/sin_pore/SIN_pore_with_radii.xyz.bin
+2026-09-09 18:47:15,030 sem.pore_geometry: INFO: Binary file interpreted as distance map (condfrac × bulk conductivity).
+2026-09-09 18:47:15,030 sem.pore_geometry: INFO: Binary file pore loaded successfully
+2026-09-09 18:47:15,030 sem.pore_geometry: INFO: Grid dimensions: 151 x 151 x 151
+2026-09-09 18:47:15,030 sem.pore_geometry: INFO: Effective size: 150.0 x 150.0 x 150.0 Å
+2026-09-09 18:47:15,031 sem.pore_geometry: INFO: Conductivity range: 0.000000 to 1.660843 S/m
+2026-09-09 18:47:15,031 sem.vertical_movement_sem: INFO: Base conductivity interpolator created
+2026-09-09 18:47:15,031 sem.vertical_movement_sem: INFO: Creating DOLFINx mesh...
+2026-09-09 18:47:15,031 sem.vertical_movement_sem: INFO: Using bin file dimensions for mesh sizing
+2026-09-09 18:47:53,371 sem.vertical_movement_sem: INFO: Created bin file mesh with 150x150x150 elements
+2026-09-09 18:47:53,371 sem.vertical_movement_sem: INFO: Mesh size: 150.0 x 150.0 x 150.0 Å
+2026-09-09 18:48:03,685 sem.vertical_movement_sem: INFO: DOLFINx setup complete
+2026-09-09 18:48:03,685 sem.cli: INFO: SEM instance created successfully
+2026-09-09 18:48:03,685 sem.cli: INFO: Running in open pore current calculation mode
+2026-09-09 18:48:03,685 sem.vertical_movement_sem: INFO: Calculating open pore current...
+2026-09-09 18:48:03,685 sem.vertical_movement_sem: INFO: Loading base conductivity into DOLFINx function...
+2026-09-09 18:48:03,685 sem.utils: INFO: Starting loadFunc (DOLFINx version)...
+2026-09-09 18:48:04,523 sem.utils: INFO: DOF coordinates shape: (20250000, 3)
+2026-09-09 18:48:08,332 sem.utils: INFO: Interpolated 20250000 values
+2026-09-09 18:48:08,358 sem.utils: INFO: loadFunc completed successfully (DOLFINx)
+2026-09-09 18:48:08,360 sem.vertical_movement_sem: INFO: Base conductivity loaded successfully
+2026-09-09 18:48:08,360 sem.vertical_movement_sem: INFO: Solving for current...
+2026-09-09 18:48:08,360 sem.vertical_movement_sem: INFO: Starting solve_for_current (DOLFINx)...
+2026-09-09 18:48:08,360 sem.vertical_movement_sem: INFO: Using existing conductivity in self.sig
+2026-09-09 18:48:08,360 sem.vertical_movement_sem: INFO: Setting up and solving linear problem...
+2026-09-09 18:49:07,350 sem.vertical_movement_sem: INFO: System solved
+2026-09-09 18:49:07,351 sem.vertical_movement_sem: INFO: Calculating flux at boundaries...
+2026-09-09 18:49:07,599 sem.vertical_movement_sem: INFO: Flux top: 41.280350698516614, Flux bottom: 41.28148695134975
+2026-09-09 18:49:07,599 sem.vertical_movement_sem: INFO: Returning current: 41.280350698516614
+2026-09-09 18:49:07,614 sem.vertical_movement_sem: INFO: Open pore current: 4.128035e+01 nA
+2026-09-09 18:49:07,614 sem.cli: INFO: Results saved to: vertical_movement_open_pore_current.txt
+2026-09-09 18:49:07,614 sem.cli: INFO: Open pore current calculation completed successfully!
+2026-09-09 18:49:07,615 sem.cli: INFO: Execution completed successfully!
+
+============================================================
+OPEN PORE CURRENT CALCULATION RESULTS
+============================================================
+Pore type: bin_file
+Binary file: /data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys15nm_cylindrical_system_updated_01182026/sin_pore/SIN_pore_with_radii.xyz.bin
+Binary file units: distance
+Membrane thickness: 0.0 Å
+Applied voltage: 500.0 mV
+Bulk conductivity: 1.7 S/m
+Grid resolution: 1.0 Å
+Open pore current: 4.128035e+01 nA
+============================================================

@@ -3,7 +3,7 @@
 Python implementation of gen_dist for generating distance fields from XYZ files.
 Equivalent to the C version for cross-platform compatibility.
 
-Usage: python gen_dist.py <xyz_file> <MinX> <MinY> <MinZ> <MaxX> <MaxY> <MaxZ> <Resolution> <cutoff> <OutputFile>
+Usage: python gen_dist.py <xyz_file> <MaxX> <MaxY> <MaxZ> <MinX> <MinY> <MinZ> <Resolution> <cutoff> <OutputFile>
 """
 
 import sys
@@ -363,7 +363,7 @@ def generate_binary_distance_field(
 def main():
     """Main function - minimal output like original"""
     if len(sys.argv) != 11:
-        print("Usage: python precision_optimized_gen_dist.py <xyz_file> <MinX> <MinY> <MinZ> <MaxX> <MaxY> <MaxZ> <Resolution> <cutoff> <OutputFile>")
+        print("Usage: python precision_optimized_gen_dist.py <xyz_file> <MaxX> <MaxY> <MaxZ> <MinX> <MinY> <MinZ> <Resolution> <cutoff> <OutputFile>")
         sys.exit(1)
     
     xyz_file = sys.argv[1]

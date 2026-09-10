@@ -1,0 +1,70 @@
+2026-09-09 20:19:16,316 sem.config: INFO: Loaded configuration from /tmp/claude_runs_derived/d30_dcprof/config.json
+2026-09-09 20:19:16,318 sem.config: INFO: Configuration validation passed
+2026-09-09 20:19:16,318 sem.config: INFO: Configuration Summary:
+2026-09-09 20:19:16,318 sem.config: INFO:   Input PDB: /data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys30nm_cylindrical_system_updated_01182026/all_atom/new_double_cone/centered_monomer.pdb
+2026-09-09 20:19:16,318 sem.config: INFO:   Pore Type: profile
+2026-09-09 20:19:16,318 sem.config: INFO:   Profile Path: /tmp/claude_runs_derived/d30_dcprof/derived_profile_pore.csv
+2026-09-09 20:19:16,318 sem.config: INFO:   Distance Metric: euclidean
+2026-09-09 20:19:16,318 sem.config: INFO:   Membrane Thickness: 201.81047443960057 Å
+2026-09-09 20:19:16,318 sem.config: INFO:   Voltage: 500 mV
+2026-09-09 20:19:16,318 sem.config: INFO:   Bulk Conductivity: 16.60843 S/m
+2026-09-09 20:19:16,318 sem.config: INFO:   Use VdW Radii: False
+2026-09-09 20:19:16,318 sem.config: INFO:   Use internal PQR prep: True
+2026-09-09 20:19:16,318 sem.config: INFO:   XY Margin: 0.0 Å
+2026-09-09 20:19:16,318 sem.config: INFO:   Mesh Engine: dolfinx
+2026-09-09 20:19:16,318 sem.config: INFO:   Save Mesh XDMF: False
+2026-09-09 20:19:16,318 sem.config: INFO:   Membrane Conductivity: 1.660843e-07 S/m
+2026-09-09 20:19:16,318 sem.config: INFO:   Z Range: 0.0 to 0.0 Å
+2026-09-09 20:19:16,318 sem.config: INFO:   Z Step: 20.0 Å
+2026-09-09 20:19:16,318 sem.config: INFO:   Output Prefix: vertical_movement
+2026-09-09 20:19:16,318 sem.config: INFO:   Preview Frames: 1
+2026-09-09 20:19:18,326 sem.cli: INFO: Creating SEM instance from configuration...
+2026-09-09 20:19:18,326 sem.cli: INFO: Using box dimensions from configuration
+2026-09-09 20:19:18,326 sem.vertical_movement_sem: INFO: Bulk conductivity scaled by fixed factor 0.100000 (input 16.6084 S/m → 1.6608 S/m)
+2026-09-09 20:19:18,326 sem.vertical_movement_sem: INFO: Per-position logging disabled (cleanup_temp_files=True). Set cleanup_temp_files=False for detailed output dumps.
+2026-09-09 20:19:18,326 sem.vertical_movement_sem: INFO: Skipping analyte preparation (open pore mode)
+2026-09-09 20:19:18,326 sem.vertical_movement_sem: INFO: Creating base conductivity grid for profile pore...
+2026-09-09 20:19:18,326 sem.vertical_movement_sem: INFO: Using 'euclidean' wall-distance metric.
+2026-09-09 20:19:18,395 sem.pore_geometry: INFO: Parametric pore wall distance metric: euclidean
+2026-09-09 20:21:06,009 sem.vertical_movement_sem: INFO: Base conductivity interpolator created
+2026-09-09 20:21:06,009 sem.vertical_movement_sem: INFO: Creating DOLFINx mesh...
+2026-09-09 20:26:57,061 sem.vertical_movement_sem: INFO: Created mesh with 300x300x300 elements
+2026-09-09 20:26:57,061 sem.vertical_movement_sem: INFO: Mesh size: 300.0 x 300.0 x 300.0 Å
+2026-09-09 20:27:47,920 sem.vertical_movement_sem: INFO: DOLFINx setup complete
+2026-09-09 20:27:47,920 sem.cli: INFO: SEM instance created successfully
+2026-09-09 20:27:47,920 sem.cli: INFO: Running in open pore current calculation mode
+2026-09-09 20:27:47,921 sem.vertical_movement_sem: INFO: Calculating open pore current...
+2026-09-09 20:27:47,921 sem.vertical_movement_sem: INFO: Loading base conductivity into DOLFINx function...
+2026-09-09 20:27:47,921 sem.utils: INFO: Starting loadFunc (DOLFINx version)...
+2026-09-09 20:27:51,124 sem.utils: INFO: DOF coordinates shape: (80276932, 3)
+2026-09-09 20:28:05,464 sem.utils: INFO: Interpolated 80276932 values
+2026-09-09 20:28:05,533 sem.utils: INFO: loadFunc completed successfully (DOLFINx)
+2026-09-09 20:28:05,539 sem.vertical_movement_sem: INFO: Base conductivity loaded successfully
+2026-09-09 20:28:05,539 sem.vertical_movement_sem: INFO: Solving for current...
+2026-09-09 20:28:05,539 sem.vertical_movement_sem: INFO: Starting solve_for_current (DOLFINx)...
+2026-09-09 20:28:05,539 sem.vertical_movement_sem: INFO: Using existing conductivity in self.sig
+2026-09-09 20:28:05,539 sem.vertical_movement_sem: INFO: Setting up and solving linear problem...
+2026-09-09 20:36:36,052 sem.vertical_movement_sem: INFO: System solved
+2026-09-09 20:36:36,052 sem.vertical_movement_sem: INFO: Calculating flux at boundaries...
+2026-09-09 20:36:36,929 sem.vertical_movement_sem: INFO: Flux top: 44.83385351913371, Flux bottom: 44.833865150831784
+2026-09-09 20:36:36,929 sem.vertical_movement_sem: INFO: Returning current: 44.83385351913371
+2026-09-09 20:36:36,979 sem.vertical_movement_sem: INFO: Open pore current: 4.483385e+01 nA
+2026-09-09 20:36:36,994 sem.cli: INFO: Results saved to: vertical_movement_open_pore_current.txt
+2026-09-09 20:36:36,994 sem.cli: INFO: Open pore current calculation completed successfully!
+2026-09-09 20:36:36,994 sem.cli: INFO: Execution completed successfully!
+
+============================================================
+OPEN PORE CURRENT CALCULATION RESULTS
+============================================================
+Pore type: profile
+Profile: /tmp/claude_runs_derived/d30_dcprof/derived_profile_pore.csv
+Distance metric: euclidean
+Membrane thickness: 201.8 Å
+Applied voltage: 500.0 mV
+Bulk conductivity: 1.7 S/m
+Grid resolution: 1.0 Å
+Open pore current: 4.483385e+01 nA
+SEM version: 0.2.0
+Git commit: unknown
+Ramp: 1.3-4.1 Å
+============================================================

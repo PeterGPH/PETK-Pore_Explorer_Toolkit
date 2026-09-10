@@ -7,7 +7,6 @@ without dolfinx.
 """
 
 import numpy as np
-import pytest
 
 from sem.pore_geometry import CylindricalPore, DoubleConePore, ProfilePore
 

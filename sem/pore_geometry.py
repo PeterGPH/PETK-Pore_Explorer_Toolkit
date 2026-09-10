@@ -433,7 +433,17 @@ class BiologicalPore(BasePore):
                 max_search_radius = cutoff  # User's modification
                 
                 # Apply translation to match gen_dist.py workflow
-                # gen_dist.py translates atoms by subtracting lower bounds
+                # gen_dist.py translates atoms by subtracting lower bounds;
+                # here the query grid (x_grid/y_grid/z_grid above) is built
+                # centred on (0, 0, 0) rather than starting at the box's
+                # lower corner, so the equivalent translation is by the
+                # centre of that same box (x_min/x_max/... computed above)
+                # rather than by its lower bounds. This brings the box
+                # centre to the origin so the atoms' cell-hash coordinates
+                # line up with the (-Lm/2 .. Lm/2)-centred grid points.
+                center_x = (x_min + x_max) / 2.0
+                center_y = (y_min + y_max) / 2.0
+                center_z = (z_min + z_max) / 2.0
                 center_coords = np.array([center_x, center_y, center_z])
                 translated_pore_positions = pore_positions - center_coords
                 

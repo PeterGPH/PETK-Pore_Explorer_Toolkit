@@ -26,6 +26,18 @@ workflow" section for the full command chain), and both the all-atom and
 the fitted-parametric configs are run through `sem open_pore` to get a
 directly comparable open-pore current.
 
+The two `..._double_cone_profile` systems re-derive the 15/30 nm
+double-cone fits as a `profile` pore (a `(z, r)` table rather than a
+parametric `double_cone`) against the same all-atom `.bin` map, so they
+share the double-cone all-atom reference run. Their
+`config_parametric_derived.json` / `derived_pore_geometry.json`
+`profile_path` points at the checked-in `derived_profile_pore.csv` in
+that system's own subdirectory, written as a path relative to the repo
+root (`validation/all_atom_match/<system>/derived_profile_pore.csv`):
+`validate_config`/`ProfilePore` open `profile_path` relative to the
+process's current working directory, not the config file's location, and
+`sem` is normally invoked from the repo root.
+
 ## Cluster paths
 
 The all-atom `.bin` grids these fits are run against live on the compute
@@ -42,40 +54,57 @@ with one `*_with_radii.xyz.bin` file per system:
 - 30 nm systems (3, 4, 6): 301^3 grid, 1 A resolution, box +-150 A.
 
 The per-system subdirectory layout under that prefix, plus each system's
-config JSON, `derive_geometry` outputs (`*_pore_geometry.json`,
-`*_derivation.json`, `*_profile.csv`, `*_profile_pore.csv`) and
-`*_open_pore_current.txt` results, are checked into this directory
-alongside `results.csv` by the cluster validation rerun.
+config JSON and `derive_geometry` outputs (`*_pore_geometry.json`,
+`*_derivation.json`, `*_profile.csv`, `*_profile_pore.csv`), are checked
+into this directory alongside `results.csv` by the cluster validation
+rerun. Each cluster run wrote its `*_open_pore_current.txt` into the code
+directory's current working directory rather than the run's own output
+directory, so later runs on the same cluster overwrote earlier ones and
+those per-run files do not exist here. The record of each run is instead
+its solver log, copied in as `<system>/all_atom_open_pore.log` (the
+`bin_file` reference run) and `<system>/parametric_open_pore.log` (the
+fitted-parametric run); each log contains the `Open pore current:` line
+and the full configuration summary for that run. These runs predate the
+provenance header added later on this branch, so the logs carry no
+`# git_commit` line.
 
 ## `results.csv`
 
 Columns: `system,pore_type,all_atom_nA,param_nA,predicted_dev_pct,commit,env,date`.
 
 - `all_atom_nA` / `param_nA`: open-pore current (nA) from the all-atom and
-  fitted-parametric runs respectively, read from each run's
-  `*_open_pore_current.txt`.
+  fitted-parametric runs respectively, read from each run's solver log
+  (`<system>/all_atom_open_pore.log` and `<system>/parametric_open_pore.log`
+  respectively; see "Cluster paths" above for why those logs, rather than
+  a per-run `*_open_pore_current.txt`, are the evidence checked in here).
 - `predicted_dev_pct`: `derive_geometry`'s own 1-D axial-resistance-integral
   estimate of the deviation (informational; the manuscript table's
   deviation column is recomputed from `all_atom_nA`/`param_nA` at full
   precision by `make_validation_table.py`, not read from this column).
 - `commit` / `env` / `date`: provenance for the run that produced the row
-  (short git commit, environment name, e.g. `sem-env`, and the run date),
-  matching the `# git_commit` / `# sem_version` provenance lines now
-  written into every `*_open_pore_current.txt` and `*_derivation.json`.
+  (short git commit, environment name, e.g. `sem-env`, and the run date).
+  These runs predate the provenance header added later on this branch, so
+  unlike a `derive_geometry` run against this branch's current code, the
+  checked-in logs and `*_derivation.json` files carry no `# git_commit`
+  line; `results.csv` is the authoritative commit record for this rerun.
 
-**This file currently ships with header only.** Both it and the per-system
-configs/outputs described above are filled in by the cluster validation
-rerun (tracked separately from this documentation/tooling change); until
-then, `make_validation_table.py` run against this file produces a
-header-comment-only `.tex` (zero rows), which is expected.
+`results.csv` has one row per system (8 rows: the six base systems plus
+the two `profile`-pore-type re-derivations of the double-cone systems).
+
+The all-atom `bin_file` configs (`<system>/config_all_atom_bin.json`)
+carry `membrane_conductivity: 0.001`, while the parametric configs carry
+`membrane_conductivity: 1.660843e-07`. This mismatch is immaterial:
+`BinFilePore` ignores the configured `membrane_conductivity` entirely,
+flooring its conductivity at `1e-7 x bulk_conductivity` from the binary
+file's `condfrac` values instead.
 
 ## Generating the manuscript table
 
 ```
-python -m sem.scripts.make_validation_table validation/all_atom_match/results.csv --output validation/all_atom_match/rows.tex
+python -m sem.scripts.make_validation_table validation/all_atom_match/results.csv --output validation/all_atom_match/table_rows.tex
 ```
 
-The manuscript `\input{}`s the resulting `rows.tex` rather than
+The manuscript `\input{}`s the resulting `table_rows.tex` rather than
 transcribing the numbers by hand.
 
 ## Results of the 2026-09-09 rerun

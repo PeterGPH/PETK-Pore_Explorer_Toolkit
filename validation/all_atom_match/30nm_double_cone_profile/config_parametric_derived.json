@@ -9,7 +9,7 @@
   },
   "pore_geometry": {
     "pore_type": "profile",
-    "profile_path": "/tmp/claude_runs_derived/d30_dcprof/derived_profile_pore.csv",
+    "profile_path": "validation/all_atom_match/30nm_double_cone_profile/derived_profile_pore.csv",
     "membrane_thickness": 201.81047443960057,
     "distance_metric": "euclidean"
   },

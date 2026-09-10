@@ -555,7 +555,7 @@ Examples:
   python -m sem config.json open_pore     # Calculate open pore current only
   python -m sem config.json rotation_scan map.dx angles.txt --samples 10
   python -m sem create_config cylindrical # Create example config file
-  python -m sem derive_geometry ...       # Derive geometry from an all-atom map (see Task 3)
+  python -m sem derive_geometry ...       # Derive geometry from an all-atom map
 
 Pore Types:
   - cylindrical: Simple cylindrical pore with optional corner rounding
@@ -611,8 +611,9 @@ Pore Types:
 
     # Derive-geometry command: fits parametric pore parameters (or a
     # radius-vs-z profile table) from an all-atom distance/conductivity map.
-    # The implementation (sem.scripts.derive_geometry) arrives in a later
-    # task; this subparser exists now purely for discoverability (--help).
+    # The implementation lives in sem.scripts.derive_geometry, imported
+    # lazily (see below) so `sem.cli` itself stays importable without
+    # scipy; this subparser exists purely for discoverability (--help).
     # Actual dispatch bypasses argparse below so its own argument parsing
     # (unknown to this module) is untouched.
     subparsers.add_parser(
@@ -624,8 +625,10 @@ Pore Types:
 
     # `derive_geometry` forwards its remaining arguments verbatim to
     # sem.scripts.derive_geometry.main, whose own CLI is defined in that
-    # (not-yet-existing) module -- so it is dispatched here, before
-    # argparse gets a chance to interpret those arguments itself.
+    # module -- so it is dispatched here, before argparse gets a chance to
+    # interpret those arguments itself. The import is lazy (done here
+    # rather than at module scope) so that `sem.cli` stays importable in
+    # an environment without scipy, which only `derive_geometry` needs.
     if raw_argv and raw_argv[0] == 'derive_geometry':
         try:
             from .scripts.derive_geometry import main as derive_geometry_main

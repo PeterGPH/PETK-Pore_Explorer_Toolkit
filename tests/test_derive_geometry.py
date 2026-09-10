@@ -194,6 +194,23 @@ def test_derive_cylindrical_with_corner_round_trip(tmp_path):
     assert result.pore_geometry["chamfer_depth"] == pytest.approx(5.0, abs=1.0)
 
 
+def test_derive_fit_corner_on_plain_cylinder_does_not_raise(tmp_path):
+    # Regression: a plain cylinder (no detectable corner) used to make
+    # `_refine_params` seed `least_squares` with corner_radius == 0.0
+    # exactly, which sits on the `bounds=(1e-6, inf)` lower edge and raises
+    # ValueError("Initial guess is outside of provided bounds"). The fix
+    # clamps the initial guess to 1e-3, matching the sibling chamfer_depth
+    # clamp already in place.
+    profile = PoreProfile.cylindrical(pore_radius=15.0, half_thickness=20.0)
+    bin_path = _make_bin(tmp_path, profile, name="plain_cylinder.bin")
+
+    result = dg.derive(bin_path, "cylindrical", fit_corner=True)
+
+    assert result.pore_geometry["pore_radius"] == pytest.approx(15.0, abs=0.05)
+    assert result.pore_geometry["corner_radius"] <= 0.05
+    assert result.derivation["predicted_deviation_pct"] < 0.2
+
+
 # ---------------------------------------------------------------------------
 # `profile` output reproduces A_bin(z) on membrane slices
 # ---------------------------------------------------------------------------
