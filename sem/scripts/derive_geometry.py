@@ -331,8 +331,17 @@ def profile_from_slices(prof, L, z_center, *, smooth=3):
     r_lo = float(np.interp(z_lo, prof.z, R_map_full))
     r_hi = float(np.interp(z_hi, prof.z, R_map_full))
 
+    # The end points are set to exactly +-half_L (not `z_lo/z_hi - z_center`,
+    # which -- since z_lo/z_hi were themselves built as `z_center -+ half_L`
+    # -- can drift from +-half_L by a floating-point rounding ULP or two
+    # once z_center != 0). `half_L = L / 2.0` here is bit-identical to
+    # `membrane_thickness / 2.0` wherever the caller reports `L` as
+    # `membrane_thickness`, so the emitted table's span matches the
+    # emitted pore_geometry block's half_thickness by construction rather
+    # than by chance -- this is what PoreProfile.from_table's +-h span
+    # check (and hence validate_config) relies on.
     interior = (z_sel > z_lo) & (z_sel < z_hi)
-    z_out = np.concatenate(([z_lo], z_sel[interior], [z_hi])) - z_center
+    z_out = np.concatenate(([-half_L], z_sel[interior] - z_center, [half_L]))
     r_out = np.concatenate(([r_lo], R_sel[interior], [r_hi]))
     return z_out, r_out
 
@@ -860,10 +869,17 @@ def _write_profile_csv(path, prof):
 
 
 def _write_profile_pore_csv(path, z_tab, r_tab):
+    # Full precision (not the "%.6f" used for the diagnostic P_profile.csv):
+    # this table's z=+-half_thickness end points must round-trip back to
+    # the exact float used for pore_geometry["membrane_thickness"] / 2, or
+    # re-loading it via PoreProfile.from_table/validate_config can reject
+    # the tool's own output over a rounding-level shortfall (see
+    # profile_from_slices for the matching in-memory endpoint pinning).
+    # "%.17g" is always enough significant digits to round-trip a double.
     with open(path, "w") as fh:
         fh.write("z,r\n")
         for zi, ri in zip(z_tab, r_tab):
-            fh.write(f"{zi:.6f},{ri:.6f}\n")
+            fh.write("{:.17g},{:.17g}\n".format(float(zi), float(ri)))
 
 
 # ---------------------------------------------------------------------------

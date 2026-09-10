@@ -260,6 +260,35 @@ def test_from_table_rejects_table_narrower_than_slab():
 
 
 # ---------------------------------------------------------------------------
+# Fix round 2: a table whose ends fall a rounding-level distance short of
+# +-h (e.g. from writing/reloading through limited-precision text) must be
+# accepted and clamped, not rejected -- but a real, larger shortfall must
+# still raise.
+# ---------------------------------------------------------------------------
+def test_from_table_clamps_rounding_level_shortfall_to_half_thickness():
+    h = 100.90523721980028
+    shortfall = 5e-7
+    z = np.array([-h + shortfall, 0.0, h - shortfall])
+    r = np.array([50.0, 25.0, 50.0])
+
+    profile = PoreProfile.from_table(z, r, half_thickness=h)
+
+    assert profile.vertices[0, 1] == -h
+    assert profile.vertices[-1, 1] == h
+    assert profile.half_thickness == h
+
+
+def test_from_table_rejects_shortfall_larger_than_rounding_slack():
+    h = 100.90523721980028
+    shortfall = 1e-3
+    z = np.array([-h + shortfall, 0.0, h - shortfall])
+    r = np.array([50.0, 25.0, 50.0])
+
+    with pytest.raises(ValueError):
+        PoreProfile.from_table(z, r, half_thickness=h)
+
+
+# ---------------------------------------------------------------------------
 # distance_xyz is rotation-invariant about the z-axis (axisymmetry).
 # ---------------------------------------------------------------------------
 def test_distance_xyz_rotation_invariance():

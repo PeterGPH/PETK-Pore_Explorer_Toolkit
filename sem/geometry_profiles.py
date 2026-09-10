@@ -250,8 +250,16 @@ class PoreProfile:
         at least ``[-half_thickness, +half_thickness]``; the table is
         clipped/resampled to exactly ``+-half_thickness`` by linear
         interpolation. ``r`` must be positive and finite throughout.
+
+        An end point that falls *short* of ``+-half_thickness`` by no more
+        than a rounding-level slack (``1e-6 * max(1.0, half_thickness)``,
+        e.g. from writing/reloading the table through limited-precision
+        text) is clamped to exactly ``+-half_thickness`` rather than
+        rejected; a larger shortfall still raises ``ValueError``.
         """
-        z = np.asarray(z, dtype=float)
+        # Copy (never alias the caller's array): the end points may be
+        # clamped in place below.
+        z = np.array(z, dtype=float, copy=True)
         r = np.asarray(r, dtype=float)
         half_thickness = float(half_thickness)
 
@@ -265,6 +273,13 @@ class PoreProfile:
             raise ValueError("Profile table z values must be strictly increasing")
         if not np.all(r > 0):
             raise ValueError("Profile table radii must be positive")
+
+        tol = 1e-6 * max(1.0, half_thickness)
+        if -half_thickness - tol <= z[0] <= -half_thickness + tol:
+            z[0] = -half_thickness
+        if half_thickness - tol <= z[-1] <= half_thickness + tol:
+            z[-1] = half_thickness
+
         if z[0] > -half_thickness or z[-1] < half_thickness:
             raise ValueError(
                 f"Profile table must span at least [-{half_thickness}, {half_thickness}]; "

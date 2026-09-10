@@ -231,6 +231,47 @@ def test_derive_profile_reproduces_area_bin(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Fix round 2: a profile table's emitted CSV must stay consistent with the
+# full-precision membrane_thickness in the emitted JSON block, even when
+# half of it has a long, non-terminating fractional part -- regression for
+# P_profile_pore.csv being rounded to 6 decimals while membrane_thickness
+# kept full precision, which made validate_config reject the tool's own
+# output on the exact +-half_thickness span check.
+# ---------------------------------------------------------------------------
+def test_derive_profile_output_survives_precision_round_trip(tmp_path):
+    # Chosen so that half_thickness's 7th decimal digit is < 5: rounding
+    # z to 6 decimals (the old, buggy P_profile_pore.csv format) rounds the
+    # table's end point *towards* zero, exactly the direction that used to
+    # make PoreProfile.from_table's +-half_thickness span check fail.
+    L = 40.2469122
+    profile = PoreProfile.cylindrical(pore_radius=15.0, half_thickness=L / 2.0)
+    bin_path = _make_bin(tmp_path, profile, name="precision.bin")
+    prefix = str(tmp_path / "precise")
+
+    rc = dg.main([bin_path, "--pore-type", "profile", "--output-prefix", prefix])
+    assert rc == 0
+
+    with open(prefix + "_pore_geometry.json") as fh:
+        pore_geometry = json.load(fh)
+    assert pore_geometry["pore_type"] == "profile"
+    profile_path = pore_geometry["profile_path"]
+    membrane_thickness = pore_geometry["membrane_thickness"]
+
+    template_path = tmp_path / "profile_template.json"
+    create_example_config("profile", str(template_path))
+    with open(template_path) as fh:
+        cfg = json.load(fh)
+    cfg["pore_geometry"] = pore_geometry
+
+    assert validate_config(cfg, require_analyte=False)
+
+    rebuilt = PoreProfile.from_params(
+        "profile", profile_path=profile_path, membrane_thickness=membrane_thickness
+    )
+    assert rebuilt.half_thickness == pytest.approx(membrane_thickness / 2.0)
+
+
+# ---------------------------------------------------------------------------
 # Conductivity-units bin
 # ---------------------------------------------------------------------------
 def test_derive_conductivity_units_matches_distance_units(tmp_path):
