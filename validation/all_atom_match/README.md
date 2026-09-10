@@ -77,3 +77,9 @@ python -m sem.scripts.make_validation_table validation/all_atom_match/results.cs
 
 The manuscript `\input{}`s the resulting `rows.tex` rather than
 transcribing the numbers by hand.
+
+## Results of the 2026-09-09 rerun
+
+All currents in `results.csv` were computed in one environment (`sem-env`: DOLFINx 0.11, MPI 1 rank for the 15 nm boxes and 2 ranks for the 30 nm boxes) with this branch's code: the six fitted parametric cases and the all-atom references at commit `1a4ff7f`, the two `profile` cases at `320735f` (the profile-table precision fix). Parametric geometries come from `derive_geometry` run on the six all-atom `.bin` maps (`<system>/derived_*.json|csv`); the all-atom references are the `bin_file` runs of the same maps (`<system>/config_all_atom_bin.json`). Deviations: 15 nm cylinder −0.36 %, corner cylinder +0.03 %, double cone −0.09 % (profile +0.19 %); 30 nm cylinder −0.15 %, corner cylinder +0.04 %, double cone +0.02 % (profile +0.10 %).
+
+`legacy_reproduction.csv` records the cross-check that `distance_metric: legacy` with this code reproduces the original installed PETK to all printed digits for the six paper-table configs, and how both differ from the archived table values (older server7 test fork, CG1 conductivity, DOLFINx 0.10): identical to 1e-5 at 15 nm, but 1.0 % (cylinders) to 2.0 % (double cone) lower at 30 nm on both the parametric and the all-atom side, so the table deviations are unchanged while the absolute 30 nm currents moved. Only single-environment comparisons should be made.

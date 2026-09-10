@@ -1,0 +1,6 @@
+{
+  "pore_type": "profile",
+  "profile_path": "/tmp/claude_runs_derived/d15_dcprof/derived_profile_pore.csv",
+  "membrane_thickness": 100.24696137976878,
+  "distance_metric": "euclidean"
+}

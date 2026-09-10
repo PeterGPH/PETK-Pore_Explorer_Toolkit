@@ -1,0 +1,33 @@
+{
+  "inputs": {
+    "bin_path": "/data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys15nm_cylindrical_system_updated_01182026/sin_pore/SIN_pore_with_radii.xyz.bin",
+    "pore_type": "cylindrical",
+    "units": "distance",
+    "bulk_conductivity": null
+  },
+  "ramp": {
+    "min": 1.3,
+    "max": 4.1
+  },
+  "membrane_thickness_integral": 100.24696137976878,
+  "membrane_thickness_crossing": 100.27977205792662,
+  "membrane_thickness_used": 100.24696137976878,
+  "z_center": -0.007384790829000565,
+  "axis_offset": [
+    -0.025692245665520835,
+    0.15738337597917532
+  ],
+  "far_radius": 67.5,
+  "fit_parameters": {
+    "pore_radius": 49.098477590232584,
+    "corner_radius": 0.0,
+    "chamfer_depth": null
+  },
+  "fit_diagnostics": {},
+  "refined_parameters": {
+    "pore_radius": 49.15031719007214
+  },
+  "residual_rms": 0.012457810957800384,
+  "predicted_deviation_pct": -0.026184953304309033,
+  "warnings": []
+}

@@ -1,0 +1,35 @@
+{
+  "inputs": {
+    "bin_path": "/data/server7/pinhao2/sem-test-conductivity-map/test/cylindrical/conductivity_map_vs_all_atom_offset/sys30nm_cylindrical_system_updated_01182026/all_atom/new_double_cone/new_with_radii.xyz.bin",
+    "pore_type": "profile",
+    "units": "distance",
+    "bulk_conductivity": null
+  },
+  "ramp": {
+    "min": 1.3,
+    "max": 4.1
+  },
+  "membrane_thickness_integral": 201.81047443960057,
+  "membrane_thickness_crossing": 201.8535297606197,
+  "membrane_thickness_used": 201.81047443960057,
+  "z_center": 0.00022600425805308078,
+  "axis_offset": [
+    0.002672602470264144,
+    0.0007324412009112147
+  ],
+  "far_radius": 135.0,
+  "fit_parameters": null,
+  "fit_diagnostics": {},
+  "refined_parameters": null,
+  "residual_rms": null,
+  "predicted_deviation_pct": -0.025505237098366607,
+  "warnings": [],
+  "provenance": {
+    "sem_version": "0.2.0",
+    "git_commit": "unknown",
+    "ramp": [
+      1.3,
+      4.1
+    ]
+  }
+}

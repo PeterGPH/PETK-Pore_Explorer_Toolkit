@@ -1,0 +1,7 @@
+{
+  "pore_type": "double_cone",
+  "pore_radius": 23.96066938307439,
+  "outer_radius": 48.992301816519976,
+  "membrane_thickness": 100.24696137976878,
+  "distance_metric": "euclidean"
+}
