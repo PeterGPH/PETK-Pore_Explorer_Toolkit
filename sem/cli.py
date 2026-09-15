@@ -61,6 +61,8 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
     # Type-specific parameters
     corner_radius = pore_geom.get("corner_radius", 0.0)
     outer_radius = pore_geom.get("outer_radius", None)
+    semi_axis_a = pore_geom.get("semi_axis_a", None)
+    semi_axis_b = pore_geom.get("semi_axis_b", None)
     top_radius = pore_geom.get("top_radius", None)
     bottom_radius = pore_geom.get("bottom_radius", None)
     biological_pore_pdb = pore_geom.get("biological_pore_pdb", None)
@@ -149,6 +151,8 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
         pore_type=pore_type,
         pore_radius=pore_radius,
         outer_radius=outer_radius,
+        semi_axis_a=semi_axis_a,
+        semi_axis_b=semi_axis_b,
         top_radius=top_radius,
         bottom_radius=bottom_radius,
         corner_radius=corner_radius,
@@ -524,7 +528,7 @@ Pore Types:
     
     # Create config command
     config_parser = subparsers.add_parser('create_config', help='Create example configuration file')
-    config_parser.add_argument('pore_type', choices=['cylindrical', 'double_cone', 'biological', 'bin_file'],
+    config_parser.add_argument('pore_type', choices=['cylindrical', 'double_cone', 'conical', 'elliptical', 'biological', 'bin_file'],
                               help='Type of pore for example configuration')
     config_parser.add_argument('-o', '--output', default='example_config.json',
                               help='Output filename (default: example_config.json)')

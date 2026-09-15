@@ -12,7 +12,7 @@ finite-element solver that runs in parallel via MPI.
 
 Use it to:
 
-- Build cylindrical, double-cone, biological, or arbitrary-geometry pores.
+- Build cylindrical, conical, double-cone, elliptical, biological, or arbitrary-geometry pores.
 - Position analyte structures (PDB) inside the pore and translate them along z.
 - Solve the Laplace problem for ionic current with steric exclusion at every frame.
 - Produce ionic-current vs. translocation-distance traces for benchmarking

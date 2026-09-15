@@ -113,6 +113,8 @@ class VerticalMovementSEM:
                  pore_type="cylindrical",  # "cylindrical", "double_cone", "conical", "biological", or "bin_file"
                  pore_radius=100.0,  # Pore radius (Å) - for cylindrical or inner radius for double cone
                  outer_radius=None,  # Outer radius for double cone (Å) - if None, uses pore_radius * 1.5
+                 semi_axis_a=None,   # Semi-axis along x for elliptical pore (A)
+                 semi_axis_b=None,   # Semi-axis along y for elliptical pore (A)
                  top_radius=None,    # Top-face radius for conical pore (Å)
                  bottom_radius=None, # Bottom-face radius for conical pore (Å)
                  corner_radius=0.0,  # Corner radius for cylindrical pore (Å)
@@ -169,6 +171,8 @@ class VerticalMovementSEM:
         self.pore_type = pore_type.lower()
         self.pore_radius = pore_radius
         self.outer_radius = outer_radius if outer_radius is not None else pore_radius * 1.5
+        self.semi_axis_a = semi_axis_a
+        self.semi_axis_b = semi_axis_b
         self.top_radius = top_radius
         self.bottom_radius = bottom_radius
         self.corner_radius = corner_radius
@@ -311,7 +315,8 @@ class VerticalMovementSEM:
                             "Set cleanup_temp_files=False for detailed output dumps.")
         
         # Validate pore type / bin units
-        if self.pore_type not in ["cylindrical", "double_cone", "conical", "biological", "bin_file"]:
+        if self.pore_type not in ["cylindrical", "double_cone", "conical", "elliptical",
+                                  "biological", "bin_file"]:
             raise ValueError("pore_type must be 'cylindrical', 'double_cone', 'conical', 'biological', or 'bin_file'")
         if self.pore_type == "bin_file":
             valid_units = ("distance", "conductivity")
@@ -484,6 +489,13 @@ class VerticalMovementSEM:
                     "to auto-calculate box dimensions."
                 )
             max_radius = max(self.top_radius, self.bottom_radius)
+        elif self.pore_type == "elliptical":
+            if self.semi_axis_a is None or self.semi_axis_b is None:
+                raise ValueError(
+                    "Elliptical pore requires both semi_axis_a and semi_axis_b "
+                    "to auto-calculate box dimensions."
+                )
+            max_radius = max(self.semi_axis_a, self.semi_axis_b)
         elif self.pore_type == "bin_file":
             # For bin files, try to read the dimensions
             try:
@@ -544,7 +556,7 @@ class VerticalMovementSEM:
             logger.info(f"Creating base conductivity grid for {self.pore_type} pore...")
         
         # Create grid if needed (for grid-based pores)
-        if self.pore_type in ["cylindrical", "double_cone", "conical", "biological"]:
+        if self.pore_type in ["cylindrical", "double_cone", "conical", "elliptical", "biological"]:
             x_range = np.linspace(
                 self.box_dimensions['x'][0],
                 self.box_dimensions['x'][1],
@@ -566,7 +578,7 @@ class VerticalMovementSEM:
         
         # Create pore object
         pore_kwargs = {}
-        if self.pore_type in ["cylindrical", "double_cone", "conical", "biological"]:
+        if self.pore_type in ["cylindrical", "double_cone", "conical", "elliptical", "biological"]:
             pore_kwargs['bulk_conductivity'] = self.bulk_conductivity
             pore_kwargs['membrane_conductivity'] = self.membrane_conductivity
 
@@ -590,6 +602,16 @@ class VerticalMovementSEM:
             pore_kwargs.update({
                 'top_radius': self.top_radius,
                 'bottom_radius': self.bottom_radius,
+                'membrane_half_thickness': self.membrane_thickness / 2
+            })
+        elif self.pore_type == "elliptical":
+            if self.semi_axis_a is None or self.semi_axis_b is None:
+                raise ValueError(
+                    "Elliptical pore requires both semi_axis_a and semi_axis_b."
+                )
+            pore_kwargs.update({
+                'semi_axis_a': self.semi_axis_a,
+                'semi_axis_b': self.semi_axis_b,
                 'membrane_half_thickness': self.membrane_thickness / 2
             })
         elif self.pore_type == "bin_file":
