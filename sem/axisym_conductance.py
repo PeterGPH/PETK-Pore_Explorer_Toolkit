@@ -35,6 +35,7 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
+from scipy.sparse import csgraph
 
 # SEM conductivity ramp (sem.utils.condfrac)
 R_MIN = 1.3
@@ -42,8 +43,13 @@ R_CUT = 4.1
 
 
 def ramp_fraction(D, r_min: float = R_MIN, r_cut: float = R_CUT):
-    """Linear SEM ramp: 0 for D <= r_min, 1 for D >= r_cut."""
-    return np.clip((np.asarray(D, float) - r_min) / (r_cut - r_min), 0.0, 1.0)
+    """Linear SEM ramp: 0 for D <= r_min, 1 for D >= r_cut (a step if equal)."""
+    if r_cut < r_min or r_min < 0:
+        raise ValueError("ramp needs 0 <= r_min <= r_cut")
+    D = np.asarray(D, float)
+    if r_cut == r_min:
+        return (D >= r_cut).astype(float)
+    return np.clip((D - r_min) / (r_cut - r_min), 0.0, 1.0)
 
 
 # --------------------------------------------------------------------------
@@ -140,6 +146,8 @@ class AxisymmetricPore:
 # --------------------------------------------------------------------------
 def _graded(length: float, h0: float, hmax: float, growth: float) -> np.ndarray:
     """Offsets 0..length with spacing h0 growing geometrically to hmax."""
+    if not (h0 > 0 and growth > 1.0):
+        raise ValueError("grid needs h_fine > 0 and growth > 1")
     pts = [0.0]
     step = h0
     while pts[-1] + step < length - 1e-12:
@@ -157,6 +165,8 @@ def graded_axis(lo: float, hi: float, fine_intervals: Sequence[tuple],
     """1D node set on [lo, hi]: uniform spacing ``h_fine`` on each interval in
     ``fine_intervals`` (clipped to [lo, hi], merged) and geometric grading
     (factor ``growth``, capped at ``h_max``) in between."""
+    if any(a > b for a, b in fine_intervals):
+        raise ValueError("fine intervals must satisfy a <= b")
     iv = sorted((max(lo, a), min(hi, b)) for a, b in fine_intervals if b > lo and a < hi)
     merged = []
     for a, b in iv:
@@ -184,6 +194,21 @@ def graded_axis(lo: float, hi: float, fine_intervals: Sequence[tuple],
     if hi > cursor:
         nodes.append(cursor + _graded(hi - cursor, h_fine, h_max, growth))
     x = np.unique(np.round(np.concatenate(nodes), 9))
+    return x
+
+
+def _with_nodes(x: np.ndarray, extra) -> np.ndarray:
+    """Insert the geometric breakpoints ``extra`` into the sorted node set
+    ``x``, replacing any node closer than 1e-6 of the local spacing so that
+    no degenerate (near-zero-width) element is created."""
+    x = np.asarray(x, float)
+    for e in np.atleast_1d(np.asarray(extra, float)):
+        if e < x[0] or e > x[-1]:
+            continue
+        i = np.searchsorted(x, e)
+        h = np.min(np.diff(x[max(i - 1, 0):i + 2])) if len(x) > 1 else 1.0
+        near = np.abs(x - e) <= 1e-6 * h
+        x = np.sort(np.concatenate([x[~near], [e]]))
     return x
 
 
@@ -229,7 +254,7 @@ def _assemble(rn, zn, sigma_fn, nq=4):
     return K
 
 
-def _robin_edges(boundary_edges, centre_z, phi_inf, N):
+def _robin_edges(boundary_edges, centre_z, phi_inf, N, sigma_fn):
     """Robin far-field term on a list of boundary edges.
     Each edge: (node0, node1, (r0, z0), (r1, z1)). Returns (Kb, rhs)."""
     rows, cols, vals = [], [], []
@@ -247,7 +272,7 @@ def _robin_edges(boundary_edges, centre_z, phi_inf, N):
             t = 0.5 * (gx + 1.0)
             p = p0 + t * (p1 - p0)
             s = p - np.array([0.0, centre_z])
-            coef = (normal @ s) / (s @ s)
+            coef = float(sigma_fn(np.array([p[0]]), np.array([p[1]]))[0]) * (normal @ s) / (s @ s)
             w = 0.5 * wx * L * p[0] * coef
             Nv = (1.0 - t, t)
             nn = (n0, n1)
@@ -260,10 +285,19 @@ def _robin_edges(boundary_edges, centre_z, phi_inf, N):
     return sp.csr_matrix((vals, (rows, cols)), shape=(N, N)), rhs
 
 
-def _solve(K, rhs, fixed, fixed_val):
+def _components(K):
+    return csgraph.connected_components(K != 0, directed=False)[1]
+
+
+def _solve(K, rhs, fixed, fixed_val, anchors):
+    """Solve K phi = rhs with phi[fixed] = fixed_val. Nodes with zero
+    conductivity and conducting islands that touch no anchor (Dirichlet or
+    Robin node) carry no current and are left at phi = 0."""
     N = K.shape[0]
     diag = K.diagonal()
     free_mask = diag > 0
+    labels = _components(K)
+    free_mask &= np.isin(labels, labels[anchors])
     free_mask[fixed] = False
     free = np.flatnonzero(free_mask)
     phi = np.zeros(N)
@@ -286,7 +320,7 @@ class SolveResult:
         return 1.0 / self.resistance
 
 
-def pore_resistance(
+def _solve_pore(
     pore: AxisymmetricPore,
     wall: str = "ramp",
     *,
@@ -300,26 +334,20 @@ def pore_resistance(
     far_factor: float = 200.0,
     box_radius: Optional[float] = None,
     box_height: Optional[float] = None,
-    growth: float = 1.06,
+    growth: float = 1.03,
     keep_field: bool = False,
     sigma_fn: Optional[Callable] = None,
     use_symmetry: bool = True,
 ) -> SolveResult:
-    """Open-pore resistance of ``pore`` (rho / Angstrom; full pore).
-
-    wall: "sharp" (sigma = 1 in the fluid, 0 in the membrane), "ramp" (SEM
-    linear ramp from r_min to r_cut in the wall distance), or "step" (sigma
-    = 1 where the wall distance >= step_distance, i.e. a sharp wall on the
-    Minkowski offset of the membrane). ``sigma_fn(r, z)`` overrides all.
-
-    The grid is uniform (``h_fine``) within ``band`` of the wall and the
-    faces and graded outward. A tapered wall is fine-gridded over its whole
-    z-extent, so for long cones start from h_fine = 0.2-0.5 A; h_fine = 0.1 A
-    converges a cylinder's ramp conductance to ~1e-5.
-    """
+    """Single solve on one grid; see :func:`pore_resistance`."""
     h = pore.h
     a_lo, a_hi = float(pore.wall_r.min()), float(pore.wall_r.max())
     symmetric = pore.symmetric and use_symmetry
+    kinks = ()
+    if sigma_fn is None and wall == "ramp":
+        kinks = (r_min, r_cut)
+    elif sigma_fn is None and wall == "step":
+        kinks = (step_distance,)
 
     if sigma_fn is None:
         if wall == "sharp":
@@ -333,7 +361,8 @@ def pore_resistance(
                 raise ValueError("wall='step' needs step_distance")
 
             def sigma_fn(r, z):
-                return (pore.distance(r, z, distance) >= step_distance).astype(float)
+                return ((pore.distance(r, z, distance) >= step_distance)
+                        & ~pore.is_solid(r, z)).astype(float)
         else:
             raise ValueError(f"unknown wall {wall!r}")
 
@@ -353,7 +382,7 @@ def pore_resistance(
     band_z = min(band, 0.9 * h) if h > 0 else band
     rn = graded_axis(0.0, r_out, [(a_lo - band_r, a_hi + band)], h_fine,
                      h_max=max(r_out / 8.0, h_fine), growth=growth)
-    rn = np.union1d(rn, pore.wall_r)
+    rn = _with_nodes(rn, pore.wall_r)
     # z: fine along the wall's z-extent if it is tapered, else near the faces
     if np.allclose(pore.wall_r, pore.wall_r[0]):
         zf = [(h - band_z, h + band)]
@@ -364,9 +393,16 @@ def pore_resistance(
     z_lo = 0.0 if symmetric else -z_out
     zn = graded_axis(z_lo, z_out, zf + ([(-band_z, band_z)] if not symmetric else []),
                      h_fine, h_max=max(z_out / 8.0, h_fine), growth=growth)
-    zn = np.union1d(zn, pore.wall_z[pore.wall_z >= z_lo])
-    if symmetric and zn[0] != 0.0:
-        zn = np.union1d([0.0], zn)
+    zn = _with_nodes(zn, pore.wall_z[pore.wall_z >= z_lo])
+    if symmetric:
+        zn = _with_nodes(zn, [0.0])
+    # put the kinks of the wall ramp on grid lines where the wall is straight
+    # (faces always; the bore of a cylinder); otherwise Gauss quadrature of the
+    # kinks adds a grid-alignment-dependent error of ~1e-6-1e-5
+    if kinks:
+        zn = _with_nodes(zn, [s * (h + k) for k in kinks for s in (1, -1)])
+        if a_lo == a_hi:
+            rn = _with_nodes(rn, [a_lo - k for k in kinks if a_lo - k > 0])
 
     nr, nz = len(rn), len(zn)
     N = nr * nz
@@ -383,36 +419,47 @@ def pore_resistance(
                      for i in range(nr - 1)]
         edges_top += [(idx(nr - 1, j), idx(nr - 1, j + 1), (rn[-1], zn[j]), (rn[-1], zn[j + 1]))
                       for j in range(nz - 1) if zn[j] >= h - 1e-9]
-        Kb, rb = _robin_edges(edges_top, h, 1.0, N)
+        Kb, rb = _robin_edges(edges_top, h, 1.0, N, sigma_fn)
         K = K + Kb
         rhs += rb
         robin_top_rows = np.unique([e[0] for e in edges_top] + [e[1] for e in edges_top])
+        terminal_a = robin_top_rows
         if not symmetric:
             edges_bot = [(idx(i, 0), idx(i + 1, 0), (rn[i], zn[0]), (rn[i + 1], zn[0]))
                          for i in range(nr - 1)]
             edges_bot += [(idx(nr - 1, j), idx(nr - 1, j + 1), (rn[-1], zn[j]), (rn[-1], zn[j + 1]))
                           for j in range(nz - 1) if zn[j + 1] <= -h + 1e-9]
-            Kb2, rb2 = _robin_edges(edges_bot, -h, -1.0, N)
+            Kb2, rb2 = _robin_edges(edges_bot, -h, -1.0, N, sigma_fn)
             K = K + Kb2
             rhs += rb2
+            terminal_b = np.unique([e[0] for e in edges_bot] + [e[1] for e in edges_bot])
     else:
         top = [idx(i, nz - 1) for i in range(nr)]
         fixed += top
         fixed_val += [1.0] * len(top)
+        terminal_a = np.asarray(top)
         if not symmetric:
             bot = [idx(i, 0) for i in range(nr)]
             fixed += bot
             fixed_val += [-1.0] * len(bot)
+            terminal_b = np.asarray(bot)
 
     if symmetric:
         a_mid = float(pore.radius_at(0.0))
         mid = [idx(i, 0) for i in range(nr) if rn[i] <= a_mid + 1e-9]
         fixed += mid
         fixed_val += [0.0] * len(mid)
+        terminal_b = np.asarray(mid)
     fixed = np.asarray(fixed, int)
     fixed_val = np.asarray(fixed_val, float)
 
-    phi = _solve(K, rhs, fixed, fixed_val)
+    # a pore closed by the membrane (or by the zero-conductivity layer) carries
+    # no current: report R = inf instead of a round-off value
+    labels = _components(K)
+    if not np.intersect1d(labels[terminal_a], labels[terminal_b]).size:
+        return SolveResult(np.inf, N, rn, zn, None)
+    anchors = np.unique(np.concatenate([fixed, terminal_a, terminal_b]))
+    phi = _solve(K, rhs, fixed, fixed_val, anchors)
 
     # current through the domain
     if symmetric:
@@ -428,3 +475,33 @@ def pore_resistance(
             current = abs(2 * np.pi * (K[top_nodes] @ phi - rhs[top_nodes]).sum())
         resistance = 2.0 / current                # total drop is 2
     return SolveResult(resistance, N, rn, zn, phi.reshape(nr, nz) if keep_field else None)
+
+
+def pore_resistance(pore: AxisymmetricPore, wall: str = "ramp", *,
+                    extrapolate: bool = False, **kwargs) -> SolveResult:
+    """Open-pore resistance of ``pore`` (rho / Angstrom; full pore).
+
+    wall: "sharp" (sigma = 1 in the fluid, 0 in the membrane), "ramp" (SEM
+    linear ramp from r_min to r_cut in the wall distance), or "step" (sigma
+    = 1 where the wall distance >= step_distance, i.e. a sharp wall on the
+    Minkowski offset of the membrane). ``sigma_fn(r, z)`` overrides all.
+
+    The grid is uniform (``h_fine``) within ``band`` of the wall and the
+    faces and graded outward. A tapered wall is fine-gridded over its whole
+    z-extent, so for long cones start from h_fine = 0.2-0.5 A; h_fine = 0.1 A
+    and growth = 1.03 give the ramp conductance of a cylinder to ~2e-5
+    (the error is set by the graded bulk, ~ (growth - 1)^2, not by h_fine).
+    ``extrapolate=True`` adds a solve with h_fine/2 and (growth - 1)/2 and
+    Richardson-extrapolates assuming second order, which brings smooth (ramp)
+    maps to ~1e-6. Sharp corners converge as h^(4/3); for sharp cylinders use
+    :mod:`sem.cylinder_mode_matching` instead.
+    """
+    res = _solve_pore(pore, wall, **kwargs)
+    if not extrapolate:
+        return res
+    fine = dict(kwargs)
+    fine["h_fine"] = 0.5 * kwargs.get("h_fine", 0.1)
+    fine["growth"] = 1.0 + 0.5 * (kwargs.get("growth", 1.03) - 1.0)
+    res2 = _solve_pore(pore, wall, **fine)
+    R = res2.resistance + (res2.resistance - res.resistance) / 3.0
+    return SolveResult(R, res.n_nodes + res2.n_nodes, res2.rn, res2.zn, res2.phi)
