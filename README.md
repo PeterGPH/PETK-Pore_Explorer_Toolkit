@@ -25,7 +25,7 @@ Use it to:
 ├── petk/                  # VMD GUI (Tcl/Tk) — petk_gui.tcl + tab1/2/3
 │   ├── analytes/          # Example analyte PDBs
 │   ├── shapes/            # Pore-geometry templates
-│   └── Demo/              # Demo inputs and reference outputs
+│   └── Demo/              # Demo inputs (1AOI nucleosome PDBs) and reference outputs
 ├── sem/                   # Python package: nanopore-sem
 │   ├── cli.py             # `sem` entry point (works in serial and under mpirun)
 │   ├── pore_geometry.py   # Geometry builders and distance fields
@@ -35,7 +35,6 @@ Use it to:
 │   ├── van_der_waals.py
 │   ├── visualization.py
 │   └── scripts/           # pdb2xyz, gen_dist, resample_bin
-├── 1AOI.pdb / centered_1AOI.pdb   # Example nucleosome analyte
 ├── config.json            # Example run config produced by the GUI
 ├── environment.yml        # Conda env (DOLFINx + MPI + Python deps)
 ├── setup.py               # `pip install -e .`
@@ -112,7 +111,9 @@ only), `sem preview_only config.json`, `sem rotation_scan config.json`, and
 `sem --help` for the full list.
 
 A minimal `config.json` is included at the repo root and reproduces a
-1AOI nucleosome translocating through a 100 Å cylindrical pore.
+1AOI nucleosome translocating through a 100 Å cylindrical pore. Run it from
+the repo root: relative paths in a config (such as `input.moving_pdb`) are
+resolved against the current working directory.
 
 ## Citation
 
