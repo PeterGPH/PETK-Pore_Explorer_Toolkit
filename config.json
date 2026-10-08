@@ -6,7 +6,7 @@
     "version": "1.0"
   },
   "input": {
-    "moving_pdb": "../centered_1AOI.pdb"
+    "moving_pdb": "petk/Demo/centered_1AOI.pdb"
   },
   "pore_geometry": {
     "pore_type": "cylindrical",
