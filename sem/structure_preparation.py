@@ -213,12 +213,24 @@ def pdb_to_pqr(
             )
             charge = float(default_charge)
 
-            pqr_line = (
-                f"{record:<6}{serial:>5} {name:<4}{alt_loc}{res_name:>3} {chain_id}"
-                f"{res_seq:>4}{i_code}   {x:>8.3f} {y:>8.3f} {z:>8.3f} "
-                f"{charge:>7.4f} {radius:>7.4f}\n"
-            )
-            fout.write(pqr_line)
+            # Use the same formatter as the pdb2pqr path. A bare f-string here
+            # glued HETATM to 5-digit serials ("HETATM22492"), dropping a
+            # field and breaking MDAnalysis's PQR parser.
+            fields = {
+                "record": record,
+                "serial": serial,
+                "atom_name": name,
+                "alt_loc": alt_loc,
+                "res_name": res_name,
+                "chain_id": chain_id,
+                "res_seq": res_seq,
+                "i_code": i_code,
+                "x": x,
+                "y": y,
+                "z": z,
+                "charge": charge,
+            }
+            fout.write(_format_pqr_atom_line(fields, radius))
 
 
 def pdb_add_radii_in_bfactor(
