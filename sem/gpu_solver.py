@@ -4,22 +4,30 @@ Batched GPU backend for SEM rotation scans.
 Solves -div(sigma grad phi) = 0 on the configured box with phi = voltage on the top face,
 phi = 0 on the bottom face and insulating side faces, for many analyte orientations at once.
 
-- Discretisation: cell-centred finite volumes on the box grid (one cell per DOLFINx box cell),
-  harmonic-mean face conductances.
-- Solver: conjugate gradients preconditioned with a multigrid V-cycle (Galerkin coarse
-  operators on blocks of 2 or 3 cells per axis, overcorrected coarse-grid correction,
-  weighted Jacobi smoothing, dense coarsest solve), started from the open-pore solution and
-  run for a fixed number of iterations.
-- Current: dissipated power divided by the voltage, whose error is quadratic in the
-  solution error.
+Discretisations (`method`):
+- "fem" (default): the same P1 finite elements as VerticalMovementSEM. DOLFINx create_box splits
+  every cube into the 6 Kuhn tetrahedra around its main diagonal, with one conductivity per
+  tetrahedron (DG0, sampled at the centroid). On that mesh the P1 stiffness matrix couples a
+  vertex only to its 6 axis neighbours: each tetrahedron adds -sigma_t * (area / length) / 6 to
+  each of its 3 axis edges and nothing to its diagonal edges. The GPU assembles exactly that
+  7-point vertex stencil, so results agree with the FEM path to solver tolerance. The current
+  is PETK's top-face flux (sigma * d(phi)/dz over the top boundary facets).
+- "fv": cell-centred finite volumes on the box cells, harmonic-mean face conductances, current
+  from dissipated power. Faster per orientation, but a different discretisation of the model.
+
+Solver: conjugate gradients preconditioned with a multigrid V-cycle (Galerkin coarse operators
+on blocks of 2 unknowns per axis, overcorrected coarse-grid correction, weighted Jacobi
+smoothing, dense coarsest solve), started from the open-pore solution and run for a fixed
+number of iterations.
 
 Conductivity follows the FEM path exactly: base (pore) conductivity is the pore's own
-interpolator evaluated at the cell centres, and the analyte modification reproduces
+interpolator at the sample points, and the analyte modification reproduces
 VerticalMovementSEM.calculate_analyte_conductivity_modification (nearest atom centre within
 `cutoff`, minus that atom's radius, then the conductivity model, then the minimum with the
 base). Units are PETK's: Angstrom, volts, conductivity in nS/A, current in nA.
 """
 
+import itertools
 import logging
 import math
 import time
@@ -38,11 +46,22 @@ NU = 2        # pre- and post-smoothing sweeps
 OVERCORRECTION = 1.8
 DENSE_MAX = 1000  # largest coarsest level solved with a dense inverse
 
+# Kuhn tetrahedra of a cube, as the order of axis steps from the cube origin to the opposite
+# corner (DOLFINx create_box). The centroid sits at 3/4, 1/2, 1/4 of a cell along those axes.
+KUHN = ((0, 1, 2), (0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0))
+
+
+def kuhn_centroid(perm):
+    off = [0.0, 0.0, 0.0]
+    for frac, axis in zip((0.75, 0.5, 0.25), perm):
+        off[axis] = frac
+    return tuple(off)
+
 
 # ---------------------------------------------------------------- grid
 @dataclass
 class BoxGrid:
-    """Cell-centred grid matching the DOLFINx box mesh of VerticalMovementSEM.setup_dolfinx."""
+    """The cells of the DOLFINx box mesh of VerticalMovementSEM.setup_dolfinx."""
     n: tuple   # cells per axis
     h: tuple   # spacing per axis (A)
     lo: tuple  # lower corner (A)
@@ -58,13 +77,14 @@ class BoxGrid:
         lo = tuple(-e / 2.0 for e in ext)
         return cls(n, h, lo)
 
-    def axis_centres(self, a):
-        return self.lo[a] + (np.arange(self.n[a]) + 0.5) * self.h[a]
+    def points(self, offset=(0.5, 0.5, 0.5)):
+        """(N, 3) points at `offset` (in cell units) inside every cell, C order (x slowest)."""
+        axes = [self.lo[a] + (np.arange(self.n[a]) + offset[a]) * self.h[a] for a in range(3)]
+        X, Y, Z = np.meshgrid(*axes, indexing="ij")
+        return np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
 
     def centres(self):
-        """(N, 3) cell centres in C order (x slowest)."""
-        X, Y, Z = np.meshgrid(*(self.axis_centres(a) for a in range(3)), indexing="ij")
-        return np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
+        return self.points()
 
 
 # ---------------------------------------------------------------- operator
@@ -73,10 +93,9 @@ def _harm(a, b):
 
 
 def _pad(t, axis, before, after):
-    """Zero-pad a (B, nx, ny, nz) tensor along spatial axis 1..3."""
-    pads = [0, 0, 0, 0, 0, 0]
-    k = 2 * (3 - axis)
-    pads[k], pads[k + 1] = before, after
+    """Zero-pad tensor t along dimension `axis` (>= 1; dimension 0 is the batch)."""
+    pads = [0] * (2 * (t.dim() - axis))
+    pads[-2], pads[-1] = before, after
     return F.pad(t, pads)
 
 
@@ -90,8 +109,8 @@ def _diag(L):
     L["Dinv"] = 1.0 / D
 
 
-def fine_level(sig, h):
-    """Face conductances of the finest level from cell conductivity sig (B, nx, ny, nz)."""
+def fv_level(sig, h):
+    """Finite volumes: face conductances from cell conductivity sig (B, nx, ny, nz)."""
     hx, hy, hz = h
     L = {
         "gx": (hy * hz / hx) * _harm(sig[:, 1:], sig[:, :-1]),
@@ -104,6 +123,43 @@ def fine_level(sig, h):
     return L
 
 
+def _kuhn_edges(sig6, h, a):
+    """P1 coupling of the vertex edges along axis a: (area/length)/6 * sum of the 6 tetrahedra
+    around each edge. sig6 is (B, 6, nx, ny, nz); the result has n_a edges along a and n+1
+    vertices along the other two axes."""
+    others = [d for d in range(3) if d != a]
+    w = h[others[0]] * h[others[1]] / h[a] / 6.0
+    C = 0.0
+    for r in itertools.product((0, 1), repeat=2):
+        # the edge sits at relative position r (along the other two axes) in a cube; the
+        # tetrahedra containing it step along exactly the axes where r = 1 before stepping along a
+        before = {others[i] for i in range(2) if r[i]}
+        tets = [t for t, p in enumerate(KUHN) if set(p[:p.index(a)]) == before]
+        S = sig6[:, tets].sum(1)
+        for i, d in enumerate(others):   # r = 0: edge vertex owns cube v; r = 1: cube v - 1
+            S = _pad(S, d + 1, r[i], 1 - r[i])
+        C = C + S
+    return w * C
+
+
+def fem_level(sig6, h):
+    """P1 finite elements on the Kuhn mesh: 7-point stencil on the vertex unknowns (all vertices
+    except the Dirichlet top and bottom layers), plus the top-face flux weights."""
+    Cx, Cy, Cz = (_kuhn_edges(sig6, h, a) for a in range(3))
+    L = {
+        "gx": Cx[..., 1:-1],
+        "gy": Cy[..., 1:-1],
+        "gz": Cz[..., 1:-1],
+        "gb": Cz[..., 0],
+        "gt": Cz[..., -1],
+    }
+    _diag(L)
+    hx, hy, hz = h
+    zfirst = [t for t, p in enumerate(KUHN) if p[0] == 2]  # tetrahedra with a facet on the top face
+    L["wt"] = sig6[:, zfirst, :, :, -1].sum(1) * (hx * hy / (2.0 * hz))
+    return L
+
+
 def apply(L, u):
     gx, gy, gz = L["gx"], L["gy"], L["gz"]
     return (L["D"] * u
@@ -113,38 +169,31 @@ def apply(L, u):
 
 
 def _block_sum(t, axis, f):
+    """Sum consecutive blocks of f entries along `axis`; a short last block is zero-padded."""
     if f == 1:
         return t
     n = t.shape[axis]
-    return t.unflatten(axis, (n // f, f)).sum(axis + 1)
+    m = -(-n // f)
+    if m * f != n:
+        t = _pad(t, axis, 0, m * f - n)
+    return t.unflatten(axis, (m, f)).sum(axis + 1)
 
 
 def _interface(gl, axis, f):
-    """Fine links that cross the faces between consecutive blocks of f cells along `axis`."""
+    """Fine links that cross the faces between consecutive blocks of f unknowns along `axis`."""
     if f == 1:
         return gl
     g = gl.movedim(axis, -1)
     n = g.shape[-1] + 1
-    out = g[..., f - 1:n - 1:f]
-    return out.movedim(-1, axis)
+    return g[..., f - 1:n - 1:f].movedim(-1, axis)
 
 
 def _factors(n):
-    out = []
-    for k in n:
-        if k <= 6:
-            out.append(1)
-        elif k % 2 == 0:
-            out.append(2)
-        elif k % 3 == 0:
-            out.append(3)
-        else:
-            out.append(1)
-    return tuple(out)
+    return tuple(2 if k > 5 else 1 for k in n)
 
 
 def coarsen(L, f):
-    """Galerkin coarse operator P^T A P for piecewise-constant P on blocks of f cells.
+    """Galerkin coarse operator P^T A P for piecewise-constant P on blocks of f unknowns.
 
     A coarse link is the sum of the fine links crossing the face between two blocks, so a
     conducting channel never closes on a coarser level, however it bends inside a block.
@@ -167,10 +216,10 @@ def _restrict(r, f):
     return r
 
 
-def _prolong(e, f):
+def _prolong(e, f, shape):
     for a, k in zip((1, 2, 3), f):
         if k > 1:
-            e = e.repeat_interleave(k, a)
+            e = e.repeat_interleave(k, a).narrow(a, 0, shape[a])
     return e
 
 
@@ -190,19 +239,17 @@ def _dense_inverse(L):
     L["Ainv"] = torch.linalg.inv(A).to(L["D"].dtype)
 
 
-def setup_hierarchy(sig, h):
-    levels, factors = [fine_level(sig, h)], []
+def setup_hierarchy(fine):
+    levels, factors = [fine], []
     while True:
-        n = levels[-1]["D"].shape[1:]
-        f = _factors(n)
+        f = _factors(levels[-1]["D"].shape[1:])
         if f == (1, 1, 1):
             break
         factors.append(f)
         levels.append(coarsen(levels[-1], f))
     k = int(np.prod(levels[-1]["D"].shape[1:]))
     if k > DENSE_MAX:
-        raise ValueError(f"grid {tuple(sig.shape[1:])} coarsens only to {k} cells; "
-                         f"choose cell counts with factors 2 and 3")
+        raise ValueError(f"coarsest level has {k} unknowns (> {DENSE_MAX})")
     _dense_inverse(levels[-1])
     return levels, factors
 
@@ -216,7 +263,7 @@ def vcycle(levels, factors, l, r):
     for _ in range(NU - 1):
         x = x + OMEGA * L["Dinv"] * (r - apply(L, x))
     rc = _restrict(r - apply(L, x), factors[l])
-    x = x + OVERCORRECTION * _prolong(vcycle(levels, factors, l + 1, rc), factors[l])
+    x = x + OVERCORRECTION * _prolong(vcycle(levels, factors, l + 1, rc), factors[l], r.shape)
     for _ in range(NU):
         x = x + OMEGA * L["Dinv"] * (r - apply(L, x))
     return x
@@ -240,14 +287,21 @@ def power_current(L, u, voltage):
     return e / voltage
 
 
-def pcg(levels, factors, b, x, iters, voltage=None, track=False):
-    """Fixed-iteration multigrid-preconditioned CG; optionally records the current per iteration."""
+def flux_current(L, u, voltage):
+    """PETK's current for the FEM level: sigma * d(phi)/dz integrated over the top facets."""
+    wt = L["wt"].to(torch.float64)
+    nx, ny = wt.shape[1:]
+    return (wt * (voltage - u[:, :nx, :ny, -1].to(torch.float64))).sum((1, 2))
+
+
+def pcg(levels, factors, b, x, iters, current=None, track=False):
+    """Fixed-iteration multigrid-preconditioned CG; with track, records current(x) per iteration."""
     L, red = levels[0], (1, 2, 3)
     r = b - apply(L, x)
     z = vcycle(levels, factors, 0, r)
     p = z.clone()
     rz = (r * z).sum(red, keepdim=True)
-    hist = [power_current(L, x, voltage)] if track else None
+    hist = [current(x)] if track else None
     tiny = torch.finfo(x.dtype).tiny
     for _ in range(iters):
         q = apply(L, p)
@@ -259,15 +313,16 @@ def pcg(levels, factors, b, x, iters, voltage=None, track=False):
         p = z + (rz_new / (rz + tiny)) * p
         rz = rz_new
         if track:
-            hist.append(power_current(L, x, voltage))
+            hist.append(current(x))
     return x, hist
 
 
 # ---------------------------------------------------------------- analyte conductivity
 class AnalyteSigma:
-    """Exact GPU copy of calculate_analyte_conductivity_modification on a BoxGrid."""
+    """Exact GPU copy of calculate_analyte_conductivity_modification, evaluated at one point per
+    grid cell (at `offset` in cell units)."""
 
-    def __init__(self, grid, base_sigma, radii, cutoff, model, device):
+    def __init__(self, grid, base_sigma, radii, cutoff, model, device, offset=(0.5, 0.5, 0.5)):
         self.grid = grid
         self.device = device
         self.base = torch.as_tensor(base_sigma, dtype=torch.float64, device=device)
@@ -279,6 +334,7 @@ class AnalyteSigma:
         self.n = torch.tensor(grid.n, device=device)
         self.h = torch.tensor(grid.h, dtype=torch.float64, device=device)
         self.lo = torch.tensor(grid.lo, dtype=torch.float64, device=device)
+        self.off = torch.tensor(offset, dtype=torch.float64, device=device)
         k = [int(math.ceil(self.cutoff / hh)) + 1 for hh in grid.h]
         offs = torch.stack(torch.meshgrid(*(torch.arange(-kk + 1, kk + 1, device=device) for kk in k),
                                           indexing="ij"), -1).reshape(-1, 3)
@@ -290,7 +346,7 @@ class AnalyteSigma:
                            torch.full_like(s, self.bulk))
 
     def __call__(self, positions):
-        """positions: (M, 3) float64 array of atom centres -> flat cell conductivity (float64)."""
+        """positions: (M, 3) float64 array of atom centres -> flat conductivity (float64)."""
         return self.batch([positions])[0]
 
     def batch(self, positions):
@@ -298,11 +354,11 @@ class AnalyteSigma:
         p = torch.as_tensor(np.stack(positions), dtype=torch.float64, device=self.device)  # (B, M, 3)
         B, M = p.shape[:2]
         ncell = int(np.prod(self.grid.n))
-        base_idx = torch.floor((p - self.lo) / self.h - 0.5).long()        # cell centre just below
+        base_idx = torch.floor((p - self.lo) / self.h - self.off).long()   # sample point just below
         cells = base_idx[:, :, None, :] + self.offsets                      # (B, M, K, 3)
         inside = ((cells >= 0) & (cells < self.n)).all(-1)
-        centre = self.lo + (cells.double() + 0.5) * self.h
-        d = torch.sqrt(((centre - p[:, :, None, :]) ** 2).sum(-1))
+        point = self.lo + (cells.double() + self.off) * self.h
+        d = torch.sqrt(((point - p[:, :, None, :]) ** 2).sum(-1))
         keep = inside & (d < self.cutoff)
         atom = torch.arange(M, device=self.device)[None, :, None].expand_as(d)[keep]
         orient = torch.arange(B, device=self.device)[:, None, None].expand_as(d)[keep]
@@ -343,11 +399,13 @@ class GPURotationScan:
     """Batched rotation scan for one protein and one pore configuration."""
 
     def __init__(self, config, device="cuda", dtype=torch.float32, iters=6, open_iters=60,
-                 compile=False):
+                 compile=False, method="fem"):
+        if method not in ("fem", "fv"):
+            raise ValueError("method must be 'fem' or 'fv'")
         t0 = time.time()
+        self.method = method
         self.compiled = compile
         self._iterate_fn = torch.compile(self._iterate, dynamic=False) if compile else self._iterate
-        self._solve = self._solve_fixed
         self.sem = sem = _NoMeshSEM.create(config)
         for flag in ("prevent_analyte_overlap", "use_charges"):
             if getattr(sem, flag, False):
@@ -359,28 +417,42 @@ class GPURotationScan:
         self.iters = iters
         self.grid = BoxGrid.from_sem(sem)
         self.voltage = float(sem.voltage)
-        centres = self.grid.centres()
-        base = np.asarray(sem.base_cond_interp(centres), dtype=np.float64)
-        base[np.isnan(base)] = sem.bulk_conductivity          # as utils.loadFunc
-        self.base_sigma = base
-        self.sigma = AnalyteSigma(self.grid, base, sem.moving_radii, sem.cutoff,
-                                  sem.conductivity_model, self.device)
+        offsets = [kuhn_centroid(p) for p in KUHN] if method == "fem" else [(0.5, 0.5, 0.5)]
+        self.sample_offsets = offsets
+        self.base_sigma = []
+        self.sigma = []
+        for off in offsets:
+            base = np.asarray(sem.base_cond_interp(self.grid.points(off)), dtype=np.float64)
+            base[np.isnan(base)] = sem.bulk_conductivity          # as utils.loadFunc
+            self.base_sigma.append(base)
+            self.sigma.append(AnalyteSigma(self.grid, base, sem.moving_radii, sem.cutoff,
+                                           sem.conductivity_model, self.device, offset=off))
         num_steps = int(abs(sem.z_end - sem.z_start) / sem.z_step) + 1
         direction = np.sign(sem.z_end - sem.z_start)
         self.z = float(sem.z_start + (num_steps - 1) * direction * sem.z_step)  # run() keeps the last z
         self.timing = {"prepare_s": time.time() - t0}
         t1 = time.time()
-        sig0 = torch.as_tensor(base, device=self.device).reshape(1, *self.grid.n).to(dtype)
-        levels, factors = setup_hierarchy(sig0, self.grid.h)
+        base = torch.as_tensor(np.stack(self.base_sigma), device=self.device)
+        levels, factors = setup_hierarchy(self._fine(base.reshape(1, len(offsets), *self.grid.n)))
         b = rhs(levels[0], self.voltage)
         self.phi0, _ = pcg(levels, factors, b, torch.zeros_like(b), open_iters)
-        self.open_current = float(power_current(levels[0], self.phi0, self.voltage)[0])
+        self.open_current = float(self._current(levels[0], self.phi0)[0])
         self._sync()
         self.timing["open_pore_s"] = time.time() - t1
 
     def _sync(self):
         if self.device.type == "cuda":
             torch.cuda.synchronize()
+
+    def _fine(self, sig):
+        """Finest level from conductivity (B, k, nx, ny, nz), k = 6 (fem) or 1 (fv)."""
+        sig = sig.to(self.dtype)
+        return fem_level(sig, self.grid.h) if self.method == "fem" else fv_level(sig[:, 0], self.grid.h)
+
+    def _current(self, L, x):
+        if self.method == "fem":
+            return flux_current(L, x, self.voltage)
+        return power_current(L, x, self.voltage)
 
     def positions(self, rotation_matrix):
         """Atom centres for one orientation, computed exactly as VerticalMovementSEM.run does."""
@@ -390,28 +462,26 @@ class GPURotationScan:
         return pos + np.array([0.0, 0.0, self.z - self.sem.moving_com[2]])
 
     def conductivity(self, rotation_matrices, chunk=16):
-        """(B, nx, ny, nz) conductivity for each rotation matrix (float64)."""
-        sig = [self.sigma.batch([self.positions(R) for R in rotation_matrices[s:s + chunk]])
-               for s in range(0, len(rotation_matrices), chunk)]
-        return torch.cat(sig).reshape(len(rotation_matrices), *self.grid.n)
+        """(B, k, nx, ny, nz) conductivity at the k sample points per cell (float64)."""
+        out = []
+        for s in range(0, len(rotation_matrices), chunk):
+            pos = [self.positions(R) for R in rotation_matrices[s:s + chunk]]
+            out.append(torch.stack([sg.batch(pos) for sg in self.sigma], 1))
+        return torch.cat(out).reshape(len(rotation_matrices), len(self.sigma), *self.grid.n)
 
     def _iterate(self, levels, factors, b):
         x, _ = pcg(levels, factors, b, self.phi0.expand_as(b).clone(), self.iters)
-        return power_current(levels[0], x, self.voltage)
-
-    def _solve_fixed(self, sig):
-        levels, factors = setup_hierarchy(sig.to(self.dtype), self.grid.h)
-        return self._iterate_fn(levels, factors, rhs(levels[0], self.voltage))
+        return self._current(levels[0], x)
 
     def solve(self, sig, iters=None, track=False):
-        if iters is None and not track:
-            return self._solve(sig), None
-        levels, factors = setup_hierarchy(sig.to(self.dtype), self.grid.h)
+        levels, factors = setup_hierarchy(self._fine(sig))
         b = rhs(levels[0], self.voltage)
+        if iters is None and not track:
+            return self._iterate_fn(levels, factors, b), None
         x0 = self.phi0.expand_as(b).clone()
         x, hist = pcg(levels, factors, b, x0, self.iters if iters is None else iters,
-                      self.voltage, track)
-        return power_current(levels[0], x, self.voltage), hist
+                      lambda u: self._current(levels[0], u), track)
+        return self._current(levels[0], x), hist
 
     def run(self, rotation_matrices, batch_size=64):
         """Currents (nA) for each rotation matrix, in order."""
