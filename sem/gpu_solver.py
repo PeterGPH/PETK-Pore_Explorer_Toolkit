@@ -6,9 +6,10 @@ phi = 0 on the bottom face and insulating side faces, for many analyte orientati
 
 - Discretisation: cell-centred finite volumes on the box grid (one cell per DOLFINx box cell),
   harmonic-mean face conductances.
-- Solver: conjugate gradients preconditioned with a geometric multigrid V-cycle
-  (series-parallel coarsening by 2 or 3 per axis, weighted Jacobi smoothing, dense coarsest
-  solve), started from the open-pore solution and run for a fixed number of iterations.
+- Solver: conjugate gradients preconditioned with a multigrid V-cycle (Galerkin coarse
+  operators on blocks of 2 or 3 cells per axis, overcorrected coarse-grid correction,
+  weighted Jacobi smoothing, dense coarsest solve), started from the open-pore solution and
+  run for a fixed number of iterations.
 - Current: dissipated power divided by the voltage, whose error is quadratic in the
   solution error.
 
@@ -32,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 OMEGA = 0.8   # weighted-Jacobi damping
 NU = 2        # pre- and post-smoothing sweeps
+# Scale of the coarse-grid correction. Piecewise-constant Galerkin coarse operators are too
+# stiff by about 2, so the correction is scaled up (overcorrection, Braess 1995).
+OVERCORRECTION = 1.8
 DENSE_MAX = 1000  # largest coarsest level solved with a dense inverse
 
 
@@ -115,26 +119,14 @@ def _block_sum(t, axis, f):
     return t.unflatten(axis, (n // f, f)).sum(axis + 1)
 
 
-def _series(gl, axis, f):
-    """Coarse link conductances along `axis` from fine links gl (length n-1 on that axis)."""
+def _interface(gl, axis, f):
+    """Fine links that cross the faces between consecutive blocks of f cells along `axis`."""
     if f == 1:
         return gl
     g = gl.movedim(axis, -1)
     n = g.shape[-1] + 1
-    if f == 2:   # coarse centre on the face between the pair: half + full + half link
-        R = 0.5 / g[..., 0:n - 3:2] + 1.0 / g[..., 1:n - 2:2] + 0.5 / g[..., 2:n - 1:2]
-    else:        # f == 3, coarse centre on the middle fine cell: three full links
-        R = 1.0 / g[..., 1:n - 4:3] + 1.0 / g[..., 2:n - 3:3] + 1.0 / g[..., 3:n - 2:3]
-    return (1.0 / R).movedim(-1, axis)
-
-
-def _boundary(gz_lat, gb_lat, f, top):
-    """Coarse boundary conductance on the top or bottom face."""
-    if f == 1:
-        return gb_lat
-    link = gz_lat[..., -1] if top else gz_lat[..., 0]
-    w = 0.5 if f == 2 else 1.0
-    return 1.0 / (w / link + 1.0 / gb_lat)
+    out = g[..., f - 1:n - 1:f]
+    return out.movedim(-1, axis)
 
 
 def _factors(n):
@@ -152,18 +144,18 @@ def _factors(n):
 
 
 def coarsen(L, f):
+    """Galerkin coarse operator P^T A P for piecewise-constant P on blocks of f cells.
+
+    A coarse link is the sum of the fine links crossing the face between two blocks, so a
+    conducting channel never closes on a coarser level, however it bends inside a block.
+    """
     fx, fy, fz = f
-    gx = _block_sum(_block_sum(L["gx"], 2, fy), 3, fz)
-    gy = _block_sum(_block_sum(L["gy"], 1, fx), 3, fz)
-    gz = _block_sum(_block_sum(L["gz"], 1, fx), 2, fy)
-    gt = _block_sum(_block_sum(L["gt"], 1, fx), 2, fy)
-    gb = _block_sum(_block_sum(L["gb"], 1, fx), 2, fy)
     C = {
-        "gx": _series(gx, 1, fx),
-        "gy": _series(gy, 2, fy),
-        "gz": _series(gz, 3, fz),
-        "gt": _boundary(gz, gt, fz, top=True),
-        "gb": _boundary(gz, gb, fz, top=False),
+        "gx": _interface(_block_sum(_block_sum(L["gx"], 2, fy), 3, fz), 1, fx),
+        "gy": _interface(_block_sum(_block_sum(L["gy"], 1, fx), 3, fz), 2, fy),
+        "gz": _interface(_block_sum(_block_sum(L["gz"], 1, fx), 2, fy), 3, fz),
+        "gt": _block_sum(_block_sum(L["gt"], 1, fx), 2, fy),
+        "gb": _block_sum(_block_sum(L["gb"], 1, fx), 2, fy),
     }
     _diag(C)
     return C
@@ -217,7 +209,7 @@ def vcycle(levels, factors, l, r):
     for _ in range(NU - 1):
         x = x + OMEGA * L["Dinv"] * (r - apply(L, x))
     rc = _restrict(r - apply(L, x), factors[l])
-    x = x + _prolong(vcycle(levels, factors, l + 1, rc), factors[l])
+    x = x + OVERCORRECTION * _prolong(vcycle(levels, factors, l + 1, rc), factors[l])
     for _ in range(NU):
         x = x + OMEGA * L["Dinv"] * (r - apply(L, x))
     return x
