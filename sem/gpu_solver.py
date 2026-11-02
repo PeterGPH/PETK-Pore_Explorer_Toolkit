@@ -175,12 +175,19 @@ def _prolong(e, f):
 
 
 def _dense_inverse(L):
+    """Inverse of the coarsest-level matrix, assembled directly from its conductances (float64)."""
     B, nx, ny, nz = L["D"].shape
     k = nx * ny * nz
-    eye = torch.eye(k, device=L["D"].device, dtype=L["D"].dtype)
-    cols = [apply(L, eye[j].expand(B, k).reshape(B, nx, ny, nz)).reshape(B, k) for j in range(k)]
-    A = torch.stack(cols, dim=2).cpu().double()
-    L["Ainv"] = torch.linalg.inv(A).to(L["D"].device, L["D"].dtype)
+    dev, d = L["D"].device, torch.float64
+    idx = torch.arange(k, device=dev).reshape(nx, ny, nz)
+    A = torch.zeros(B, k, k, device=dev, dtype=d)
+    A[:, idx.ravel(), idx.ravel()] = L["D"].reshape(B, k).to(d)
+    for g, a, b in ((L["gx"], idx[:-1], idx[1:]), (L["gy"], idx[:, :-1], idx[:, 1:]),
+                    (L["gz"], idx[..., :-1], idx[..., 1:])):
+        a, b, v = a.ravel(), b.ravel(), -g.reshape(B, -1).to(d)
+        A[:, a, b] = v
+        A[:, b, a] = v
+    L["Ainv"] = torch.linalg.inv(A).to(L["D"].dtype)
 
 
 def setup_hierarchy(sig, h):
@@ -284,28 +291,34 @@ class AnalyteSigma:
 
     def __call__(self, positions):
         """positions: (M, 3) float64 array of atom centres -> flat cell conductivity (float64)."""
-        p = torch.as_tensor(positions, dtype=torch.float64, device=self.device)
+        return self.batch([positions])[0]
+
+    def batch(self, positions):
+        """positions: list of (M, 3) arrays, one per orientation -> (B, ncell) conductivity."""
+        p = torch.as_tensor(np.stack(positions), dtype=torch.float64, device=self.device)  # (B, M, 3)
+        B, M = p.shape[:2]
+        ncell = int(np.prod(self.grid.n))
         base_idx = torch.floor((p - self.lo) / self.h - 0.5).long()        # cell centre just below
-        cells = base_idx[:, None, :] + self.offsets[None]                   # (M, K, 3)
+        cells = base_idx[:, :, None, :] + self.offsets                      # (B, M, K, 3)
         inside = ((cells >= 0) & (cells < self.n)).all(-1)
         centre = self.lo + (cells.double() + 0.5) * self.h
-        d = torch.sqrt(((centre - p[:, None, :]) ** 2).sum(-1))
+        d = torch.sqrt(((centre - p[:, :, None, :]) ** 2).sum(-1))
         keep = inside & (d < self.cutoff)
-        atom = torch.arange(len(p), device=self.device)[:, None].expand_as(d)[keep]
+        atom = torch.arange(M, device=self.device)[None, :, None].expand_as(d)[keep]
+        orient = torch.arange(B, device=self.device)[:, None, None].expand_as(d)[keep]
         d = d[keep]
         c = cells[keep]
-        flat = (c[:, 0] * self.grid.n[1] + c[:, 1]) * self.grid.n[2] + c[:, 2]
-        ncell = int(np.prod(self.grid.n))
-        dmin = torch.full((ncell,), float("inf"), dtype=torch.float64, device=self.device)
+        flat = orient * ncell + (c[:, 0] * self.grid.n[1] + c[:, 1]) * self.grid.n[2] + c[:, 2]
+        dmin = torch.full((B * ncell,), float("inf"), dtype=torch.float64, device=self.device)
         dmin = dmin.scatter_reduce(0, flat, d, reduce="amin")
         nearest = d == dmin[flat]
-        r = torch.full((ncell,), float("inf"), dtype=torch.float64, device=self.device)
+        r = torch.full((B * ncell,), float("inf"), dtype=torch.float64, device=self.device)
         r = r.scatter_reduce(0, flat[nearest], self.radii[atom[nearest]], reduce="amin")
         hit = torch.isfinite(dmin)
         s = (dmin[hit] - r[hit]).clamp_min(0.0)
-        sig = self.base.clone()
+        sig = self.base.repeat(B)
         sig[hit] = torch.minimum(sig[hit], self.model(s))
-        return sig
+        return sig.reshape(B, ncell)
 
 
 # ---------------------------------------------------------------- scan driver
@@ -329,8 +342,12 @@ class _NoMeshSEM:
 class GPURotationScan:
     """Batched rotation scan for one protein and one pore configuration."""
 
-    def __init__(self, config, device="cuda", dtype=torch.float32, iters=6, open_iters=60):
+    def __init__(self, config, device="cuda", dtype=torch.float32, iters=6, open_iters=60,
+                 compile=False):
         t0 = time.time()
+        self.compiled = compile
+        self._iterate_fn = torch.compile(self._iterate, dynamic=False) if compile else self._iterate
+        self._solve = self._solve_fixed
         self.sem = sem = _NoMeshSEM.create(config)
         for flag in ("prevent_analyte_overlap", "use_charges"):
             if getattr(sem, flag, False):
@@ -372,11 +389,23 @@ class GPURotationScan:
         self.sem.reset_analyte_rotation()
         return pos + np.array([0.0, 0.0, self.z - self.sem.moving_com[2]])
 
-    def conductivity(self, rotation_matrices):
-        sig = [self.sigma(self.positions(R)) for R in rotation_matrices]
-        return torch.stack(sig).reshape(len(sig), *self.grid.n)
+    def conductivity(self, rotation_matrices, chunk=16):
+        """(B, nx, ny, nz) conductivity for each rotation matrix (float64)."""
+        sig = [self.sigma.batch([self.positions(R) for R in rotation_matrices[s:s + chunk]])
+               for s in range(0, len(rotation_matrices), chunk)]
+        return torch.cat(sig).reshape(len(rotation_matrices), *self.grid.n)
+
+    def _iterate(self, levels, factors, b):
+        x, _ = pcg(levels, factors, b, self.phi0.expand_as(b).clone(), self.iters)
+        return power_current(levels[0], x, self.voltage)
+
+    def _solve_fixed(self, sig):
+        levels, factors = setup_hierarchy(sig.to(self.dtype), self.grid.h)
+        return self._iterate_fn(levels, factors, rhs(levels[0], self.voltage))
 
     def solve(self, sig, iters=None, track=False):
+        if iters is None and not track:
+            return self._solve(sig), None
         levels, factors = setup_hierarchy(sig.to(self.dtype), self.grid.h)
         b = rhs(levels[0], self.voltage)
         x0 = self.phi0.expand_as(b).clone()
@@ -389,11 +418,15 @@ class GPURotationScan:
         out, t_sig, t_solve = [], 0.0, 0.0
         for s in range(0, len(rotation_matrices), batch_size):
             t0 = time.time()
-            sig = self.conductivity(rotation_matrices[s:s + batch_size])
+            mats = rotation_matrices[s:s + batch_size]
+            n = len(mats)
+            if self.compiled and n < batch_size:  # keep one shape so the compiled solve is reused
+                mats = list(mats) + [mats[-1]] * (batch_size - n)
+            sig = self.conductivity(mats)
             self._sync()
             t1 = time.time()
             current, _ = self.solve(sig)
-            out.append(current.cpu().numpy())
+            out.append(current[:n].cpu().numpy())
             t2 = time.time()
             t_sig += t1 - t0
             t_solve += t2 - t1
