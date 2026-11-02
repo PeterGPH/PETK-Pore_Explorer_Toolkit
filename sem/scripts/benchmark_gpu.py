@@ -90,8 +90,13 @@ def read_open_pore(prefix):
 
 
 def read_run(prefix):
-    data = np.loadtxt(f"{prefix}_results.txt", comments="#", ndmin=2)
-    return data[:, 0], data[:, 1], data[:, 3]     # z, current, blockage
+    """z, current and blockade; the blockade is recomputed from the currents and the header's
+    open-pore current, because the Blockage column is written with two decimals only."""
+    path = Path(f"{prefix}_results.txt")
+    data = np.loadtxt(path, comments="#", ndmin=2)
+    i0 = next(float(line.split(":")[1].split()[0]) for line in path.read_text().splitlines()
+              if line.startswith("# Open_pore_current:"))
+    return data[:, 0], data[:, 1], 100 * (1 - data[:, 1] / i0)
 
 
 def read_rotations(folder):
