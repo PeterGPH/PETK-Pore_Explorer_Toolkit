@@ -8,6 +8,7 @@ import csv
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -223,36 +224,101 @@ def _broadcast(obj):
         return obj
 
 
-def _run_rotation_scan_gpu(base_config: dict, rotations, args: argparse.Namespace):
-    """rotation_scan --backend gpu: batched GPU solve; writes the same rotation_results.csv."""
+def _add_backend_arguments(parser: argparse.ArgumentParser):
+    """--backend and the GPU options, shared by run, open_pore, preview_only and rotation_scan."""
+    parser.add_argument('--backend', choices=['fem', 'gpu'], default='fem',
+                        help='fem: DOLFINx solve (default); gpu: batched solve on a GPU')
+    parser.add_argument('--gpu-batch', type=int, default=64,
+                        help='Cases (z positions or orientations) solved together on the GPU (default: 64)')
+    parser.add_argument('--gpu-iters', type=int, default=None,
+                        help='Multigrid-preconditioned CG iterations per solve '
+                             '(default: 14 for the flux current, 8 for the power current)')
+    parser.add_argument('--gpu-device', default='cuda', help='Torch device for the GPU backend (default: cuda)')
+    parser.add_argument('--gpu-dtype', choices=['float32', 'float64'], default=None,
+                        help='Precision of the GPU solve (default: float64 for the flux current, '
+                             'float32 for the power current)')
+    parser.add_argument('--gpu-method', choices=['fem', 'fv'], default='fem',
+                        help='fem: the same P1 finite elements as the FEM backend (default); '
+                             'fv: cell-centred finite volumes (faster, different discretisation)')
+    parser.add_argument('--gpu-current', choices=['flux', 'power'], default=None,
+                        help='flux: top-facet flux as the FEM backend reports it (fem default); '
+                             'power: dissipated power / voltage (fv default)')
+    parser.add_argument('--gpu-compile', action='store_true',
+                        help='Compile the GPU solve with torch.compile (faster after a one-off compile)')
+
+
+def _gpu_solver(config: dict, args: argparse.Namespace, prepare_analyte: bool = True):
+    """GPUSolver for this configuration from the --gpu-* options."""
     if comm is not None and comm.size > 1:
         raise ValueError("The GPU backend runs on a single process; drop mpirun.")
-    if args.mode != "run":
-        raise ValueError("The GPU backend supports --mode run only.")
     import torch
-    from .gpu_solver import GPURotationScan
+    from .gpu_solver import GPUSolver
 
     dtype = {"float64": torch.float64, "float32": torch.float32}.get(args.gpu_dtype)
-    scan = GPURotationScan(base_config, device=args.gpu_device, dtype=dtype, iters=args.gpu_iters,
-                           compile=args.gpu_compile, method=args.gpu_method, current=args.gpu_current)
-    logger.info("Open pore current: %.6e nA", scan.open_current)
-    matrices = [rotation_matrix_from_spec(spec) for spec in rotations]
-    currents = scan.run(matrices, batch_size=args.gpu_batch)
+    solver = GPUSolver(config, device=args.gpu_device, dtype=dtype, iters=args.gpu_iters,
+                       compile=args.gpu_compile, method=args.gpu_method, current=args.gpu_current,
+                       prepare_analyte=prepare_analyte)
+    logger.info("GPU backend: method %s, current %s, %s, %d iterations, grid %s cells",
+                solver.method, solver.current, str(solver.dtype).replace("torch.", ""), solver.iters,
+                solver.grid.n)
+    logger.info("Open pore current: %.6e nA", solver.open_current)
+    return solver
 
+
+def _gpu_timing(solver, args: argparse.Namespace) -> dict:
+    return dict(solver.timing, grid=list(solver.grid.n), iters=solver.iters, batch=args.gpu_batch,
+                dtype=str(solver.dtype).replace("torch.", ""), device=args.gpu_device,
+                compiled=args.gpu_compile, method=solver.method, current=solver.current)
+
+
+def _run_rotation_scan_gpu(base_config: dict, rotations, args: argparse.Namespace):
+    """rotation_scan --backend gpu. Writes the files of the FEM path: rotation_results.csv (the
+    current at the last z position) and, in run mode, hybrid_currents.csv (every z position)."""
+    if args.mode == "run" and base_config.get("output", {}).get("arbd_export"):
+        raise NotImplementedError("rotation_scan --backend gpu does not write ARBD grids; "
+                                  "use `run --backend gpu` for one orientation.")
+    solver = _gpu_solver(base_config, args, prepare_analyte=(args.mode == "run"))
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    rows = [(args.start_index + k, spec.rx, spec.ry, spec.rz, float(c))
-            for k, (spec, c) in enumerate(zip(rotations, currents))]
+    i0 = solver.open_current
+    t0 = time.time()
+    if args.mode == "open_pore":
+        rows = [(args.start_index + k, spec.rx, spec.ry, spec.rz, i0) for k, spec in enumerate(rotations)]
+        hybrid = []
+    else:
+        z_positions = solver.z_positions()
+        matrices = [rotation_matrix_from_spec(spec) for spec in rotations]
+        cases = [(R, z) for R in matrices for z in z_positions]
+        res = solver.solve_cases(cases, batch_size=args.gpu_batch)
+        nz = len(z_positions)
+        cur = res["currents"].reshape(len(rotations), nz)
+        rows, hybrid = [], []
+        for k, spec in enumerate(rotations):
+            idx = args.start_index + k
+            rows.append((idx, spec.rx, spec.ry, spec.rz, float(cur[k, -1])))
+            for j, z in enumerate(z_positions):
+                c = float(cur[k, j])
+                hybrid.append((idx, float(spec.rx), float(spec.ry), float(spec.rz), float(z),
+                               c, c / i0, (1 - c / i0) * 100))
+        skipped = sum(1 for note in res["overlap"] if note)
+        if skipped:
+            logger.warning("%d of %d (orientation, z) cases rejected by prevent_analyte_overlap", skipped, len(cases))
+        solver.timing.update(sigma_s=float(res["sigma_s"].sum()), solve_s=float(res["solve_s"].sum()),
+                             n=len(cases))
+    solver.timing["run_s"] = time.time() - t0
     with open(output_dir / "rotation_results.csv", "w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["index", "rx", "ry", "rz", "current_nA"])
         writer.writerows(rows)
-    (output_dir / "open_pore_current.txt").write_text(f"{scan.open_current:.10e}\n")
-    timing = dict(scan.timing, grid=list(scan.grid.n), iters=scan.iters, batch=args.gpu_batch,
-                  dtype=str(scan.dtype).replace("torch.", ""), device=args.gpu_device, compiled=args.gpu_compile,
-                  method=args.gpu_method, current=scan.current)
-    (output_dir / "gpu_timing.json").write_text(json.dumps(timing, indent=2))
-    logger.info("GPU rotation scan: %d orientations, grid %s, timing %s", len(rows), scan.grid.n, scan.timing)
+    if hybrid:
+        with open(output_dir / "hybrid_currents.csv", "w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["index", "rx", "ry", "rz", "z_A", "current_nA", "normalized_current", "blockage"])
+            writer.writerows(hybrid)
+    (output_dir / "open_pore_current.txt").write_text(f"{i0:.10e}\n")
+    (output_dir / "gpu_timing.json").write_text(json.dumps(_gpu_timing(solver, args), indent=2))
+    logger.info("GPU rotation scan (%s): %d orientations, timing %s", args.mode, len(rows), solver.timing)
+    logger.info("Rotation scan results saved to %s", output_dir / "rotation_results.csv")
 
 
 def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: Path | None):
@@ -297,8 +363,11 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
         rotations = _broadcast(rotations)
 
     if getattr(args, "backend", "fem") == "gpu":
-        _run_rotation_scan_gpu(base_config_copy, rotations, args)
-        return
+        if args.mode != "preview_only":
+            _run_rotation_scan_gpu(base_config_copy, rotations, args)
+            return
+        if rank == 0:
+            logger.info("preview_only solves nothing; --backend gpu has no effect on it")
 
     reuse_mesh = getattr(args, "reuse_mesh", False)
     shared_sem_instance = None
@@ -507,6 +576,63 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
             hybrid_path, len(hybrid_rows), len(results),
         )
 
+def _report_open_pore(sem, open_current):
+    """Print the open-pore summary and write <prefix>_open_pore_current.txt (both backends)."""
+    if rank != 0:
+        return
+    print(f"\n{'='*60}")
+    print(f"OPEN PORE CURRENT CALCULATION RESULTS")
+    print(f"{'='*60}")
+    print(f"Pore type: {sem.pore_type}")
+    if sem.pore_type == "cylindrical":
+        print(f"Pore radius: {sem.pore_radius:.1f} Å")
+        if sem.corner_radius > 0:
+            print(f"Corner radius: {sem.corner_radius:.1f} Å")
+    elif sem.pore_type == "double_cone":
+        print(f"Inner radius: {sem.pore_radius:.1f} Å")
+        print(f"Outer radius: {sem.outer_radius:.1f} Å")
+    elif sem.pore_type == "biological":
+        print(f"Biological pore: {sem.biological_pore_pdb}")
+    elif sem.pore_type == "bin_file":
+        print(f"Binary file: {sem.bin_file_path}")
+        print(f"Binary file units: {sem.bin_file_units}")
+
+    print(f"Membrane thickness: {sem.membrane_thickness:.1f} Å")
+    print(f"Applied voltage: {sem.voltage*1000:.1f} mV")
+    print(f"Bulk conductivity: {sem.bulk_conductivity:.1f} S/m")
+    print(f"Grid resolution: {sem.grid_resolution:.1f} Å")
+    print(f"Open pore current: {open_current:.6e} nA")
+    print(f"{'='*60}")
+
+    # Save results to file
+    output_file = f"{sem.output_prefix}_open_pore_current.txt"
+    with open(output_file, 'w') as f:
+        f.write(f"# Open pore current calculation results\n")
+        f.write(f"# Pore type: {sem.pore_type}\n")
+        if sem.pore_type == "cylindrical":
+            f.write(f"# Pore radius: {sem.pore_radius:.1f} Angstrom\n")
+            if sem.corner_radius > 0:
+                f.write(f"# Corner radius: {sem.corner_radius:.1f} Angstrom\n")
+        elif sem.pore_type == "double_cone":
+            f.write(f"# Inner radius: {sem.pore_radius:.1f} Angstrom\n")
+            f.write(f"# Outer radius: {sem.outer_radius:.1f} Angstrom\n")
+        elif sem.pore_type == "biological":
+            f.write(f"# Biological pore: {sem.biological_pore_pdb}\n")
+        elif sem.pore_type == "bin_file":
+            f.write(f"# Binary file: {sem.bin_file_path}\n")
+            f.write(f"# Binary file units: {sem.bin_file_units}\n")
+
+        f.write(f"# Membrane thickness: {sem.membrane_thickness:.1f} Angstrom\n")
+        f.write(f"# Applied voltage: {sem.voltage*1000:.1f} mV\n")
+        f.write(f"# Bulk conductivity: {sem.bulk_conductivity:.1f} S/m\n")
+        f.write(f"# Grid resolution: {sem.grid_resolution:.1f} Angstrom\n")
+        f.write(f"# Open_pore_current(nA)\n")
+        f.write(f"{open_current:.6e}\n")
+
+    logger.info(f"Results saved to: {output_file}")
+    logger.info("Open pore current calculation completed successfully!")
+
+
 def main():
     """
     Main function to run SEM with JSON configuration.
@@ -522,6 +648,8 @@ Examples:
   python -m sem config.json preview_only  # Generate preview plots only
   python -m sem config.json open_pore     # Calculate open pore current only
   python -m sem config.json rotation_scan map.dx angles.txt --samples 10
+  python -m sem run config.json --backend gpu            # same run on a GPU
+  python -m sem rotation_scan config.json . angles.txt --mode run --backend gpu
   python -m sem create_config cylindrical # Create example config file
   
 Pore Types:
@@ -564,25 +692,8 @@ Pore Types:
                                  help='Rotate analyte in-place and reuse a single SEM mesh instance (no PDB rewriting)')
     rotation_parser.add_argument('--reuse-open-pore', action='store_true',
                                  help='Compute open pore current once and reuse for all rotations (assumes mesh is unchanged)')
-    rotation_parser.add_argument('--backend', choices=['fem', 'gpu'], default='fem',
-                                 help='fem: DOLFINx solve per rotation (default); gpu: batched solve on a GPU')
-    rotation_parser.add_argument('--gpu-batch', type=int, default=64,
-                                 help='Orientations solved together on the GPU (default: 64)')
-    rotation_parser.add_argument('--gpu-iters', type=int, default=None,
-                                 help='Multigrid-preconditioned CG iterations per solve '
-                                      '(default: 14 for the flux current, 8 for the power current)')
-    rotation_parser.add_argument('--gpu-device', default='cuda', help='Torch device for the GPU backend (default: cuda)')
-    rotation_parser.add_argument('--gpu-dtype', choices=['float32', 'float64'], default=None,
-                                 help='Precision of the GPU solve (default: float64 for the flux current, '
-                                      'float32 for the power current)')
-    rotation_parser.add_argument('--gpu-method', choices=['fem', 'fv'], default='fem',
-                                 help='fem: the same P1 finite elements as the FEM backend (default); '
-                                      'fv: cell-centred finite volumes (faster, different discretisation)')
-    rotation_parser.add_argument('--gpu-current', choices=['flux', 'power'], default=None,
-                                 help='flux: top-facet flux as the FEM backend reports it (fem default); '
-                                      'power: dissipated power / voltage (fv default)')
-    rotation_parser.add_argument('--gpu-compile', action='store_true',
-                                 help='Compile the GPU solve with torch.compile (faster after a one-off compile)')
+    for p in (run_parser, preview_parser, open_pore_parser, rotation_parser):
+        _add_backend_arguments(p)
     
     # Create config command
     config_parser = subparsers.add_parser('create_config', help='Create example configuration file')
@@ -629,6 +740,19 @@ Pore Types:
                 logger.info("Execution completed successfully!")
             return
         
+        if getattr(args, "backend", "fem") == "gpu" and args.command in ("run", "open_pore"):
+            solver = _gpu_solver(config, args, prepare_analyte=(args.command == "run"))
+            if args.command == "open_pore":
+                _report_open_pore(solver.sem, solver.open_current)
+            else:
+                solver.run_scan(batch_size=args.gpu_batch)
+            if rank == 0:
+                logger.info("GPU timing: %s", _gpu_timing(solver, args))
+                logger.info("Execution completed successfully!")
+            return
+        if getattr(args, "backend", "fem") == "gpu" and rank == 0:
+            logger.info("preview_only solves nothing; --backend gpu has no effect on it")
+
         # Create SEM instance
         prepare_analyte = args.command != 'open_pore'
         gmsh_center_override = None
@@ -649,59 +773,7 @@ Pore Types:
             try:
                 open_current = sem.calculate_open_pore_current()
                 
-                # Print results to console
-                if rank == 0:
-                    print(f"\n{'='*60}")
-                    print(f"OPEN PORE CURRENT CALCULATION RESULTS")
-                    print(f"{'='*60}")
-                    print(f"Pore type: {sem.pore_type}")
-                    if sem.pore_type == "cylindrical":
-                        print(f"Pore radius: {sem.pore_radius:.1f} Å")
-                        if sem.corner_radius > 0:
-                            print(f"Corner radius: {sem.corner_radius:.1f} Å")
-                    elif sem.pore_type == "double_cone":
-                        print(f"Inner radius: {sem.pore_radius:.1f} Å")
-                        print(f"Outer radius: {sem.outer_radius:.1f} Å")
-                    elif sem.pore_type == "biological":
-                        print(f"Biological pore: {sem.biological_pore_pdb}")
-                    elif sem.pore_type == "bin_file":
-                        print(f"Binary file: {sem.bin_file_path}")
-                        print(f"Binary file units: {sem.bin_file_units}")
-                    
-                    print(f"Membrane thickness: {sem.membrane_thickness:.1f} Å")
-                    print(f"Applied voltage: {sem.voltage*1000:.1f} mV")
-                    print(f"Bulk conductivity: {sem.bulk_conductivity:.1f} S/m")
-                    print(f"Grid resolution: {sem.grid_resolution:.1f} Å")
-                    print(f"Open pore current: {open_current:.6e} nA")
-                    print(f"{'='*60}")
-                    
-                    # Save results to file
-                    output_file = f"{sem.output_prefix}_open_pore_current.txt"
-                    with open(output_file, 'w') as f:
-                        f.write(f"# Open pore current calculation results\n")
-                        f.write(f"# Pore type: {sem.pore_type}\n")
-                        if sem.pore_type == "cylindrical":
-                            f.write(f"# Pore radius: {sem.pore_radius:.1f} Angstrom\n")
-                            if sem.corner_radius > 0:
-                                f.write(f"# Corner radius: {sem.corner_radius:.1f} Angstrom\n")
-                        elif sem.pore_type == "double_cone":
-                            f.write(f"# Inner radius: {sem.pore_radius:.1f} Angstrom\n")
-                            f.write(f"# Outer radius: {sem.outer_radius:.1f} Angstrom\n")
-                        elif sem.pore_type == "biological":
-                            f.write(f"# Biological pore: {sem.biological_pore_pdb}\n")
-                        elif sem.pore_type == "bin_file":
-                            f.write(f"# Binary file: {sem.bin_file_path}\n")
-                            f.write(f"# Binary file units: {sem.bin_file_units}\n")
-                        
-                        f.write(f"# Membrane thickness: {sem.membrane_thickness:.1f} Angstrom\n")
-                        f.write(f"# Applied voltage: {sem.voltage*1000:.1f} mV\n")
-                        f.write(f"# Bulk conductivity: {sem.bulk_conductivity:.1f} S/m\n")
-                        f.write(f"# Grid resolution: {sem.grid_resolution:.1f} Angstrom\n")
-                        f.write(f"# Open_pore_current(nA)\n")
-                        f.write(f"{open_current:.6e}\n")
-                    
-                    logger.info(f"Results saved to: {output_file}")
-                    logger.info("Open pore current calculation completed successfully!")
+                _report_open_pore(sem, open_current)
                 
             except Exception as e:
                 if rank == 0:

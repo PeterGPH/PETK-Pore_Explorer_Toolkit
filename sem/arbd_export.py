@@ -168,7 +168,10 @@ def export_phi_dx(sem_instance, uh, filename, custom_resolution=None):
     x_range, y_range, z_range, delta, origin, _ = _build_grid_axes(
         sem_instance, custom_resolution
     )
-    phi_grid_V = _sample_dolfinx_function_on_grid(uh, x_range, y_range, z_range, fill_value=0.0)
+    if hasattr(uh, "sample_on_grid"):   # GPU backend: P1 vertex potential (gpu_solver.GridPotential)
+        phi_grid_V = uh.sample_on_grid(x_range, y_range, z_range, fill_value=0.0)
+    else:
+        phi_grid_V = _sample_dolfinx_function_on_grid(uh, x_range, y_range, z_range, fill_value=0.0)
     _write_dx(filename, phi_grid_V, delta, origin)
     if sem_instance.rank == 0:
         logger.info("  phi range: [%.4g, %.4g] V", float(phi_grid_V.min()), float(phi_grid_V.max()))

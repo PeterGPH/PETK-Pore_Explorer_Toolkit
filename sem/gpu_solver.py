@@ -320,9 +320,15 @@ def pcg(levels, factors, b, x, iters, current=None, track=False):
 # ---------------------------------------------------------------- analyte conductivity
 class AnalyteSigma:
     """Exact GPU copy of calculate_analyte_conductivity_modification, evaluated at one point per
-    grid cell (at `offset` in cell units)."""
+    grid cell (at `offset` in cell units).
 
-    def __init__(self, grid, base_sigma, radii, cutoff, model, device, offset=(0.5, 0.5, 0.5)):
+    With `membrane_conductivity` set, `batch(..., with_overlap=True)` also flags orientations in
+    which an atom's hard core (surface distance <= model.min_distance) reaches a membrane point,
+    the check prevent_analyte_overlap makes in the FEM path.
+    """
+
+    def __init__(self, grid, base_sigma, radii, cutoff, model, device, offset=(0.5, 0.5, 0.5),
+                 membrane_conductivity=None):
         self.grid = grid
         self.device = device
         self.base = torch.as_tensor(base_sigma, dtype=torch.float64, device=device)
@@ -331,6 +337,7 @@ class AnalyteSigma:
         self.min_distance = float(model.min_distance)
         self.model_cutoff = float(model.cutoff)
         self.bulk = float(model.bulk_conductivity)
+        self.membrane = None if membrane_conductivity is None else float(membrane_conductivity)
         self.n = torch.tensor(grid.n, device=device)
         self.h = torch.tensor(grid.h, dtype=torch.float64, device=device)
         self.lo = torch.tensor(grid.lo, dtype=torch.float64, device=device)
@@ -349,8 +356,9 @@ class AnalyteSigma:
         """positions: (M, 3) float64 array of atom centres -> flat conductivity (float64)."""
         return self.batch([positions])[0]
 
-    def batch(self, positions):
-        """positions: list of (M, 3) arrays, one per orientation -> (B, ncell) conductivity."""
+    def batch(self, positions, with_overlap=False):
+        """positions: list of (M, 3) arrays, one per orientation -> (B, ncell) conductivity
+        (and a (B,) bool tensor of hard-core membrane overlaps when with_overlap)."""
         p = torch.as_tensor(np.stack(positions), dtype=torch.float64, device=self.device)  # (B, M, 3)
         B, M = p.shape[:2]
         ncell = int(np.prod(self.grid.n))
@@ -373,8 +381,54 @@ class AnalyteSigma:
         hit = torch.isfinite(dmin)
         s = (dmin[hit] - r[hit]).clamp_min(0.0)
         sig = self.base.repeat(B)
-        sig[hit] = torch.minimum(sig[hit], self.model(s))
-        return sig.reshape(B, ncell)
+        base_hit = sig[hit]
+        sig[hit] = torch.minimum(base_hit, self.model(s))
+        sig = sig.reshape(B, ncell)
+        if not with_overlap:
+            return sig
+        overlap = torch.zeros(B, dtype=torch.bool, device=self.device)
+        if self.membrane is not None:
+            bad = (s <= self.min_distance) & (base_hit <= self.membrane)
+            which = torch.nonzero(hit).squeeze(1)[bad] // ncell
+            overlap[which] = True
+        return sig, overlap
+
+
+# ---------------------------------------------------------------- potential on a grid
+class GridPotential:
+    """P1 potential on the vertices of the Kuhn box mesh, for the ARBD export.
+
+    `sample_on_grid` evaluates the P1 function exactly as dolfinx Function.eval does: the Kuhn
+    tetrahedron containing a point is the one whose step order is the order of the point's
+    fractional coordinates within its cube, largest first.
+    """
+
+    def __init__(self, grid, phi):
+        self.grid = grid
+        self.phi = np.asarray(phi, dtype=np.float64)       # (nx+1, ny+1, nz+1) volts
+
+    def sample_on_grid(self, x_range, y_range, z_range, fill_value=0.0):
+        X, Y, Z = np.meshgrid(x_range, y_range, z_range, indexing="ij")
+        P = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
+        n, h, lo = np.array(self.grid.n), np.array(self.grid.h), np.array(self.grid.lo)
+        rel = (P - lo) / h
+        tol = 1e-9
+        inside = ((rel >= -tol) & (rel <= n + tol)).all(1)
+        cube = np.clip(np.floor(rel), 0, n - 1).astype(int)
+        frac = np.clip(rel - cube, 0.0, 1.0)
+        order = np.argsort(-frac, axis=1, kind="stable")
+        rows = np.arange(len(P))
+        v = cube.copy()
+        out = self.phi[v[:, 0], v[:, 1], v[:, 2]].copy()
+        for k in range(3):
+            a = order[:, k]
+            nxt = v.copy()
+            nxt[rows, a] += 1
+            out += frac[rows, a] * (self.phi[nxt[:, 0], nxt[:, 1], nxt[:, 2]]
+                                    - self.phi[v[:, 0], v[:, 1], v[:, 2]])
+            v = nxt
+        out[~inside] = fill_value
+        return out.reshape(X.shape)
 
 
 # ---------------------------------------------------------------- scan driver
@@ -382,24 +436,28 @@ class _NoMeshSEM:
     """VerticalMovementSEM constructed without its DOLFINx mesh (analyte, pore and model only)."""
 
     @staticmethod
-    def create(config):
+    def create(config, prepare_analyte=True):
         from . import vertical_movement_sem as vms
         from .cli import create_sem_from_config
 
         original = vms.VerticalMovementSEM.setup_dolfinx
         vms.VerticalMovementSEM.setup_dolfinx = lambda self: None
         try:
-            sem, _ = create_sem_from_config(config, prepare_analyte=True)
+            sem, _ = create_sem_from_config(config, prepare_analyte=prepare_analyte)
         finally:
             vms.VerticalMovementSEM.setup_dolfinx = original
         return sem
 
 
-class GPURotationScan:
-    """Batched rotation scan for one protein and one pore configuration."""
+class GPUSolver:
+    """Batched GPU solver for one configuration (one analyte, one pore, one grid).
+
+    It solves any list of (rotation matrix, z) cases; `run_scan` reproduces
+    VerticalMovementSEM.run (the `run` mode) and `run` the fixed-z rotation scan.
+    """
 
     def __init__(self, config, device="cuda", dtype=None, iters=None, open_iters=100,
-                 compile=False, method="fem", current=None):
+                 compile=False, method="fem", current=None, prepare_analyte=True):
         if method not in ("fem", "fv"):
             raise ValueError("method must be 'fem' or 'fv'")
         current = current or ("flux" if method == "fem" else "power")
@@ -418,10 +476,9 @@ class GPURotationScan:
         self.current = current
         self.compiled = compile
         self._iterate_fn = torch.compile(self._iterate, dynamic=False) if compile else self._iterate
-        self.sem = sem = _NoMeshSEM.create(config)
-        for flag in ("prevent_analyte_overlap", "use_charges"):
-            if getattr(sem, flag, False):
-                raise NotImplementedError(f"GPU backend does not support {flag}")
+        self.sem = sem = _NoMeshSEM.create(config, prepare_analyte)
+        if prepare_analyte and getattr(sem, "use_charges", False):
+            raise NotImplementedError("GPU backend does not support use_charges")
         if sem.mesh_engine != "dolfinx":
             raise NotImplementedError("GPU backend supports the uniform dolfinx box mesh only")
         self.device = torch.device(device)
@@ -429,22 +486,28 @@ class GPURotationScan:
         self.iters = iters
         self.grid = BoxGrid.from_sem(sem)
         self.voltage = float(sem.voltage)
+        # the domain attributes setup_dolfinx would set (the ARBD export reads them)
+        sem.domain_min = list(self.grid.lo)
+        sem.domain_max = [lo + n * h for lo, n, h in zip(self.grid.lo, self.grid.n, self.grid.h)]
+        sem.num_cells = list(self.grid.n)
         offsets = [kuhn_centroid(p) for p in KUHN] if method == "fem" else [(0.5, 0.5, 0.5)]
         self.sample_offsets = offsets
         self.base_sigma = []
         self.sigma = []
+        has_analyte = prepare_analyte and len(sem.moving_radii) > 0
+        membrane = sem.membrane_conductivity if sem.prevent_analyte_overlap else None
         for off in offsets:
             base = np.asarray(sem.base_cond_interp(self.grid.points(off)), dtype=np.float64)
             base[np.isnan(base)] = sem.bulk_conductivity          # as utils.loadFunc
             self.base_sigma.append(base)
-            self.sigma.append(AnalyteSigma(self.grid, base, sem.moving_radii, sem.cutoff,
-                                           sem.conductivity_model, self.device, offset=off))
-        num_steps = int(abs(sem.z_end - sem.z_start) / sem.z_step) + 1
-        direction = np.sign(sem.z_end - sem.z_start)
-        self.z = float(sem.z_start + (num_steps - 1) * direction * sem.z_step)  # run() keeps the last z
+            if has_analyte:
+                self.sigma.append(AnalyteSigma(self.grid, base, sem.moving_radii, sem.cutoff,
+                                               sem.conductivity_model, self.device, offset=off,
+                                               membrane_conductivity=membrane))
+        self.z = float(self.z_positions()[-1])  # run() reports the last z position
         self.timing = {"prepare_s": time.time() - t0}
         t1 = time.time()
-        # open-pore solution in float64: every orientation is then solved for its change from phi0
+        # open-pore solution in float64: every case is then solved for its change from phi0
         base = torch.as_tensor(np.stack(self.base_sigma), device=self.device)
         L0 = self._fine(base.reshape(1, len(offsets), *self.grid.n))
         levels, factors = setup_hierarchy(L0)
@@ -454,9 +517,17 @@ class GPURotationScan:
         self._sync()
         self.timing["open_pore_s"] = time.time() - t1
 
+    # ------------------------------------------------------------ helpers
     def _sync(self):
         if self.device.type == "cuda":
             torch.cuda.synchronize()
+
+    def z_positions(self):
+        """The z positions VerticalMovementSEM.run visits."""
+        sem = self.sem
+        num_steps = int(abs(sem.z_end - sem.z_start) / sem.z_step) + 1
+        direction = np.sign(sem.z_end - sem.z_start)
+        return sem.z_start + np.arange(num_steps) * (direction * sem.z_step)
 
     def _fine(self, sig):
         """Finest level, in float64, from conductivity (B, k, nx, ny, nz), k = 6 (fem) or 1 (fv)."""
@@ -481,52 +552,270 @@ class GPURotationScan:
         levels, factors = setup_hierarchy(Ls)
         return L, levels, factors, r0
 
-    def positions(self, rotation_matrix):
-        """Atom centres for one orientation, computed exactly as VerticalMovementSEM.run does."""
-        self.sem.set_analyte_rotation_matrix(rotation_matrix)
-        pos = self.sem._get_rotated_analyte_positions()
-        self.sem.reset_analyte_rotation()
-        return pos + np.array([0.0, 0.0, self.z - self.sem.moving_com[2]])
+    def vertex_potential(self, phi):
+        """Full P1 vertex potential (nx+1, ny+1, nz+1), Dirichlet layers included (fem only)."""
+        if self.method != "fem":
+            raise NotImplementedError("vertex potentials exist for --gpu-method fem only")
+        phi = phi.to(torch.float64)
+        full = _pad(_pad(phi, 3, 1, 0), 3, 0, 1)
+        full[..., -1] = self.voltage
+        return full.cpu().numpy()
 
-    def conductivity(self, rotation_matrices, chunk=16):
-        """(B, k, nx, ny, nz) conductivity at the k sample points per cell (float64)."""
-        out = []
-        for s in range(0, len(rotation_matrices), chunk):
-            pos = [self.positions(R) for R in rotation_matrices[s:s + chunk]]
-            out.append(torch.stack([sg.batch(pos) for sg in self.sigma], 1))
-        return torch.cat(out).reshape(len(rotation_matrices), len(self.sigma), *self.grid.n)
+    def open_pore_potential(self):
+        return GridPotential(self.grid, self.vertex_potential(self.phi0)[0])
+
+    # ------------------------------------------------------------ cases
+    def positions(self, rotation_matrix=None, z=None):
+        """Atom centres for one case, computed exactly as VerticalMovementSEM.run does: the
+        rotation about the centre of mass, then the centre of mass moved to z."""
+        z = self.z if z is None else float(z)
+        if rotation_matrix is not None:
+            self.sem.set_analyte_rotation_matrix(rotation_matrix)
+        try:
+            pos = self.sem._get_rotated_analyte_positions()
+        finally:
+            if rotation_matrix is not None:
+                self.sem.reset_analyte_rotation()
+        return pos + np.array([0.0, 0.0, z - self.sem.moving_com[2]])
+
+    def _radius_overlap(self, pos):
+        """PETK's geometric overlap check (prevent_analyte_overlap with use_radius_overlap_check)."""
+        from .vertical_movement_sem import AnalyteOverlapError
+        sem = self.sem
+        if not (sem.prevent_analyte_overlap and sem.use_radius_overlap_check):
+            return None
+        try:
+            sem._assert_radius_overlap(pos, sem.moving_radii)
+        except AnalyteOverlapError as exc:
+            return str(exc)
+        return None
+
+    def conductivity(self, cases, chunk=16, with_overlap=False):
+        """(B, k, nx, ny, nz) conductivity at the k sample points per cell (float64) for cases
+        given as rotation matrices or (rotation matrix, z) pairs; with_overlap also returns a list
+        with an overlap message (or None) per case."""
+        if not self.sigma:
+            raise RuntimeError("this solver was built without an analyte (prepare_analyte=False)")
+        cases = [c if isinstance(c, tuple) else (c, None) for c in cases]
+        out, notes = [], []
+        for s in range(0, len(cases), chunk):
+            pos = [self.positions(R, z) for R, z in cases[s:s + chunk]]
+            parts = [sg.batch(pos, with_overlap=True) for sg in self.sigma]
+            out.append(torch.stack([p[0] for p in parts], 1))
+            if with_overlap:
+                hard = torch.stack([p[1] for p in parts]).any(0).cpu().numpy()
+                for P, h in zip(pos, hard):
+                    note = self._radius_overlap(P)
+                    if note is None and h:
+                        note = "analyte hard core overlaps the membrane"
+                    notes.append(note)
+        sig = torch.cat(out).reshape(len(cases), len(self.sigma), *self.grid.n)
+        return (sig, notes) if with_overlap else sig
 
     def _iterate(self, levels, factors, r):
         psi, _ = pcg(levels, factors, r, torch.zeros_like(r), self.iters)
         return psi
 
-    def solve(self, sig, iters=None, track=False):
-        """CG in self.dtype for psi = phi - phi0; the current is evaluated in float64 from phi0 + psi."""
+    def solve(self, sig, iters=None, track=False, return_phi=False):
+        """CG in self.dtype for psi = phi - phi0; the current is evaluated in float64 from phi0 + psi.
+        Returns (current, history) or, with return_phi, (current, history, phi)."""
         L, levels, factors, r0 = self._prepare(sig)
         r = r0.to(self.dtype)
         phi = lambda u: self.phi0 + u.to(torch.float64)
         if iters is None and not track:
-            return self._current(L, phi(self._iterate_fn(levels, factors, r))), None
-        psi, hist = pcg(levels, factors, r, torch.zeros_like(r), self.iters if iters is None else iters,
-                        lambda u: self._current(L, phi(u)), track)
-        return self._current(L, phi(psi)), hist
+            psi, hist = self._iterate_fn(levels, factors, r), None
+        else:
+            psi, hist = pcg(levels, factors, r, torch.zeros_like(r), self.iters if iters is None else iters,
+                            lambda u: self._current(L, phi(u)), track)
+        full = phi(psi)
+        current = self._current(L, full)
+        return (current, hist, full) if return_phi else (current, hist)
 
-    def run(self, rotation_matrices, batch_size=64):
-        """Currents (nA) for each rotation matrix, in order."""
-        out, t_sig, t_solve = [], 0.0, 0.0
-        for s in range(0, len(rotation_matrices), batch_size):
+    def solve_cases(self, cases, batch_size=64, keep_phi=()):
+        """Solve (rotation matrix, z) cases in batches.
+
+        Returns a dict with the current per case (NaN where prevent_analyte_overlap rejects the
+        case), the overlap message per case, per-case conductivity and solve times (the batch
+        time shared evenly), and {index: GridPotential} for the cases in keep_phi.
+        """
+        keep_phi = set(keep_phi)
+        n_all = len(cases)
+        currents = np.full(n_all, np.nan)
+        notes = [None] * n_all
+        t_sig = np.zeros(n_all)
+        t_solve = np.zeros(n_all)
+        phis = {}
+        for s in range(0, n_all, batch_size):
+            idx = list(range(s, min(s + batch_size, n_all)))
+            batch = [cases[i] for i in idx]
+            if self.compiled and len(batch) < batch_size:  # keep one shape for the compiled solve
+                batch = batch + [batch[-1]] * (batch_size - len(batch))
             t0 = time.time()
-            mats = rotation_matrices[s:s + batch_size]
-            n = len(mats)
-            if self.compiled and n < batch_size:  # keep one shape so the compiled solve is reused
-                mats = list(mats) + [mats[-1]] * (batch_size - n)
-            sig = self.conductivity(mats)
+            sig, note = self.conductivity(batch, with_overlap=True)
             self._sync()
             t1 = time.time()
-            current, _ = self.solve(sig)
-            out.append(current[:n].cpu().numpy())
+            want = any(i in keep_phi for i in idx)
+            out = self.solve(sig, return_phi=want)
+            cur = out[0].cpu().numpy()
+            self._sync()
             t2 = time.time()
-            t_sig += t1 - t0
-            t_solve += t2 - t1
-        self.timing.update(sigma_s=t_sig, solve_s=t_solve, n=len(rotation_matrices))
-        return np.concatenate(out) if out else np.zeros(0)
+            for j, i in enumerate(idx):
+                notes[i] = note[j]
+                currents[i] = np.nan if note[j] else cur[j]
+                t_sig[i] = (t1 - t0) / len(idx)
+                t_solve[i] = (t2 - t1) / len(idx)
+                if want and i in keep_phi and not note[j]:
+                    phis[i] = GridPotential(self.grid, self.vertex_potential(out[2][j:j + 1])[0])
+        return {"currents": currents, "overlap": notes, "sigma_s": t_sig, "solve_s": t_solve, "phi": phis}
+
+    def run(self, rotation_matrices, batch_size=64):
+        """Currents (nA) at the last z position for each rotation matrix, in order."""
+        t0 = time.time()
+        res = self.solve_cases([(R, None) for R in rotation_matrices], batch_size)
+        self.timing.update(sigma_s=float(res["sigma_s"].sum()), solve_s=float(res["solve_s"].sum()),
+                           n=len(rotation_matrices), run_s=time.time() - t0)
+        return res["currents"]
+
+    # ------------------------------------------------------------ the `run` mode
+    def run_scan(self, batch_size=64):
+        """VerticalMovementSEM.run on the GPU: the z scan of the analyte in its PDB orientation.
+
+        Writes the same files (<prefix>_results.txt, and the per-position, timing-analysis and
+        timing-summary files when verbose_output is on), runs the ARBD export when configured,
+        and returns the same results dict.
+        """
+        from .arbd_export import export_arbd_grids, should_export_at_step
+        sem = self.sem
+        t_start = time.time()
+        z = self.z_positions()
+        arbd = getattr(sem, "arbd_export_config", None)
+        if arbd and self.method != "fem":
+            raise NotImplementedError("ARBD export with the GPU backend needs --gpu-method fem")
+        if arbd:
+            export_arbd_grids(sem, self.open_pore_potential(), None, arbd)
+        keep = [i for i in range(len(z)) if arbd and should_export_at_step(i, arbd)]
+        t_sim = time.time()
+        res = self.solve_cases([(None, zz) for zz in z], batch_size, keep_phi=keep)
+        for i, note in enumerate(res["overlap"]):
+            if note:
+                logger.warning("Skipping position %d/%d (Z=%.2f A) due to analyte overlap: %s",
+                               i + 1, len(z), z[i], note)
+        for i in keep:
+            if i in res["phi"]:
+                export_arbd_grids(sem, res["phi"][i], float(z[i]), arbd)
+        simulation_time = time.time() - t_sim
+        return write_run_outputs(sem, z, res, self.open_current, self.timing["open_pore_s"],
+                                 simulation_time, time.time() - t_start + self.timing["prepare_s"])
+
+
+GPURotationScan = GPUSolver  # earlier name
+
+
+def write_run_outputs(sem, z_positions, res, open_current, open_pore_time, simulation_time, total_time):
+    """The output files and results dict of VerticalMovementSEM.run, from a GPU z scan."""
+    currents = np.asarray(res["currents"], dtype=float)
+    ok = np.isfinite(currents)
+    cond_t = np.where(ok, res["sigma_s"], np.nan)
+    solve_t = np.where(ok, res["solve_s"], np.nan)
+    mesh_t = np.where(ok, 0.0, np.nan)
+    pos_t = cond_t + solve_t
+    normalized = currents / open_current
+    blockages = (1 - normalized) * 100
+    n = len(z_positions)
+
+    def fmt(seconds):
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        if seconds < 3600:
+            return f"{seconds / 60:.1f}m"
+        return f"{seconds / 3600:.1f}h"
+
+    avg_pos = float(np.nanmean(pos_t)) if ok.any() else float("nan")
+    per_hour = 3600 / avg_pos if ok.any() and avg_pos > 0 else 0.0
+    prefix = sem.output_prefix
+    if sem.verbose_output:
+        for i in np.flatnonzero(ok):
+            with open(f"{prefix}_position_{i:04d}.dat", "w") as f:
+                f.write(f"# Position {i + 1}/{n}\n")
+                f.write(f"# Z_position: {z_positions[i]} Å\n")
+                f.write(f"# Current: {currents[i]:.6e} nA\n")
+                f.write(f"# Blockage: {blockages[i]:.2f}%\n")
+                f.write(f"# Mesh_time: {mesh_t[i]:.3f} s\n")
+                f.write(f"# Conductivity_time: {cond_t[i]:.3f} s\n")
+                f.write(f"# Solver_time: {solve_t[i]:.3f} s\n")
+                f.write(f"# Total_time: {pos_t[i]:.3f} s\n")
+                f.write(f"# Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"{z_positions[i]:.1f} {currents[i]:.6e} {blockages[i]:.2f} {mesh_t[i]:.3f} "
+                        f"{cond_t[i]:.3f} {solve_t[i]:.3f} {pos_t[i]:.3f}\n")
+    header = "\n".join(f"# {line}" for line in [
+        "Z_position(Å) Current(nA) Normalized_Current Blockage(%) Mesh_time(s) Conductivity_time(s) "
+        "Solver_time(s) Total_time(s)",
+        f"Pore_type: {sem.pore_type}",
+        f"Open_pore_current: {open_current:.6e} A",
+        f"Total_simulation_time: {fmt(total_time)}",
+        f"Average_time_per_position: {avg_pos:.3f}s",
+        f"Throughput: {per_hour:.1f} positions/hour",
+        f"Use_VdW_radii: {sem.use_vdw_radii}",
+        "Backend: gpu",
+    ])
+    np.savetxt(f"{prefix}_results.txt",
+               np.column_stack([z_positions, currents, normalized, blockages, mesh_t, cond_t, solve_t, pos_t]),
+               header=header, fmt=["%.1f", "%.6e", "%.6f", "%.2f", "%.3f", "%.3f", "%.3f", "%.3f"])
+    if sem.verbose_output:
+        timing_header = "\n".join(f"# {line}" for line in [
+            "COMPREHENSIVE TIMING ANALYSIS (GPU backend: per-position times are batch times shared evenly)",
+            f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Total positions: {n}",
+            f"Total simulation time: {fmt(total_time)}",
+            f"Open pore calculation: {fmt(open_pore_time)}",
+            f"Main simulation: {fmt(simulation_time)}",
+            f"Average per position: {avg_pos:.3f}s",
+            f"Throughput: {per_hour:.1f} positions/hour",
+            "",
+            "Position Z_position(Å) Mesh_time(s) Conductivity_time(s) Solver_time(s) Total_time(s)",
+        ])
+        np.savetxt(f"{prefix}_timing_analysis.txt",
+                   np.column_stack([np.arange(1, n + 1), z_positions, mesh_t, cond_t, solve_t, pos_t]),
+                   header=timing_header, fmt=["%d", "%.1f", "%.6f", "%.6f", "%.6f", "%.6f"])
+        with open(f"{prefix}_timing_summary.txt", "w") as f:
+            f.write("SEM Simulation Timing Summary (GPU backend)\n")
+            f.write(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"{'=' * 50}\n\n")
+            f.write(f"Total Time: {fmt(total_time)}\n")
+            f.write(f"Positions: {n}\n")
+            f.write(f"Throughput: {per_hour:.1f} positions/hour\n")
+            f.write(f"Open Pore: {fmt(open_pore_time)}\n")
+            f.write(f"Simulation: {fmt(simulation_time)}\n\n")
+            f.write("Per Position (average):\n")
+            f.write(f"  Conductivity: {np.nanmean(cond_t):.4f}s\n")
+            f.write(f"  GPU Solver:   {np.nanmean(solve_t):.4f}s\n")
+            f.write(f"  Total:        {avg_pos:.4f}s\n")
+    if ok.any():
+        k = int(np.nanargmax(blockages))
+        logger.info("Simulation complete! Maximum blockage: %.1f%% at Z = %.1f A", blockages[k], z_positions[k])
+    logger.info("Results saved to: %s_results.txt", prefix)
+    return {
+        "z_positions": z_positions,
+        "currents": currents,
+        "normalized_currents": normalized,
+        "blockages": blockages,
+        "open_current": open_current,
+        "pore_type": sem.pore_type,
+        "pore_radius": sem.pore_radius,
+        "outer_radius": sem.outer_radius if sem.pore_type == "double_cone" else None,
+        "corner_radius": sem.corner_radius if sem.pore_type == "cylindrical" else None,
+        "biological_pore_pdb": sem.biological_pore_pdb if sem.pore_type == "biological" else None,
+        "bin_file_path": sem.bin_file_path if sem.pore_type == "bin_file" else None,
+        "use_vdw_radii": sem.use_vdw_radii,
+        "timing": {
+            "total_time": total_time,
+            "open_pore_time": open_pore_time,
+            "simulation_time": simulation_time,
+            "position_times": pos_t,
+            "mesh_times": mesh_t,
+            "conductivity_times": cond_t,
+            "solver_times": solve_t,
+            "avg_position_time": avg_pos,
+            "positions_per_hour": per_hour,
+        },
+    }
