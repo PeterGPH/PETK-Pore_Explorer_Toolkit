@@ -94,8 +94,9 @@ def read_run(prefix):
     open-pore current, because the Blockage column is written with two decimals only."""
     path = Path(f"{prefix}_results.txt")
     data = np.loadtxt(path, comments="#", ndmin=2)
-    i0 = next(float(line.split(":")[1].split()[0]) for line in path.read_text().splitlines()
-              if line.startswith("# Open_pore_current:"))
+    # the header lines carry their own "# " on top of np.savetxt's, so match anywhere in the line
+    i0 = next(float(line.split("Open_pore_current:")[1].split()[0]) for line in path.read_text().splitlines()
+              if line.startswith("#") and "Open_pore_current:" in line)
     return data[:, 0], data[:, 1], 100 * (1 - data[:, 1] / i0)
 
 
