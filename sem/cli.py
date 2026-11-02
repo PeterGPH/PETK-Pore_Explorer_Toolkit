@@ -223,6 +223,36 @@ def _broadcast(obj):
         return obj
 
 
+def _run_rotation_scan_gpu(base_config: dict, rotations, args: argparse.Namespace):
+    """rotation_scan --backend gpu: batched finite-volume solve; writes the same rotation_results.csv."""
+    if comm is not None and comm.size > 1:
+        raise ValueError("The GPU backend runs on a single process; drop mpirun.")
+    if args.mode != "run":
+        raise ValueError("The GPU backend supports --mode run only.")
+    import torch
+    from .gpu_solver import GPURotationScan
+
+    dtype = torch.float64 if args.gpu_dtype == "float64" else torch.float32
+    scan = GPURotationScan(base_config, device=args.gpu_device, dtype=dtype, iters=args.gpu_iters)
+    logger.info("Open pore current: %.6e nA", scan.open_current)
+    matrices = [rotation_matrix_from_spec(spec) for spec in rotations]
+    currents = scan.run(matrices, batch_size=args.gpu_batch)
+
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows = [(args.start_index + k, spec.rx, spec.ry, spec.rz, float(c))
+            for k, (spec, c) in enumerate(zip(rotations, currents))]
+    with open(output_dir / "rotation_results.csv", "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["index", "rx", "ry", "rz", "current_nA"])
+        writer.writerows(rows)
+    (output_dir / "open_pore_current.txt").write_text(f"{scan.open_current:.10e}\n")
+    timing = dict(scan.timing, grid=list(scan.grid.n), iters=args.gpu_iters, batch=args.gpu_batch,
+                  dtype=args.gpu_dtype, device=args.gpu_device)
+    (output_dir / "gpu_timing.json").write_text(json.dumps(timing, indent=2))
+    logger.info("GPU rotation scan: %d orientations, grid %s, timing %s", len(rows), scan.grid.n, scan.timing)
+
+
 def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: Path | None):
     if rank == 0:
         logger.info("Starting rotation scan with mode '%s'", args.mode)
@@ -263,6 +293,10 @@ def run_rotation_scan(base_config: dict, args: argparse.Namespace, config_file: 
 
     if comm is not None:
         rotations = _broadcast(rotations)
+
+    if getattr(args, "backend", "fem") == "gpu":
+        _run_rotation_scan_gpu(base_config_copy, rotations, args)
+        return
 
     reuse_mesh = getattr(args, "reuse_mesh", False)
     shared_sem_instance = None
@@ -528,6 +562,15 @@ Pore Types:
                                  help='Rotate analyte in-place and reuse a single SEM mesh instance (no PDB rewriting)')
     rotation_parser.add_argument('--reuse-open-pore', action='store_true',
                                  help='Compute open pore current once and reuse for all rotations (assumes mesh is unchanged)')
+    rotation_parser.add_argument('--backend', choices=['fem', 'gpu'], default='fem',
+                                 help='fem: DOLFINx solve per rotation (default); gpu: batched finite-volume solve on a GPU')
+    rotation_parser.add_argument('--gpu-batch', type=int, default=64,
+                                 help='Orientations solved together on the GPU (default: 64)')
+    rotation_parser.add_argument('--gpu-iters', type=int, default=6,
+                                 help='Multigrid-preconditioned CG iterations per solve (default: 6)')
+    rotation_parser.add_argument('--gpu-device', default='cuda', help='Torch device for the GPU backend (default: cuda)')
+    rotation_parser.add_argument('--gpu-dtype', choices=['float32', 'float64'], default='float32',
+                                 help='Precision of the GPU solve (default: float32)')
     
     # Create config command
     config_parser = subparsers.add_parser('create_config', help='Create example configuration file')
