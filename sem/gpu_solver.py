@@ -399,7 +399,7 @@ class GPURotationScan:
     """Batched rotation scan for one protein and one pore configuration."""
 
     def __init__(self, config, device="cuda", dtype=torch.float32, iters=12, open_iters=100,
-                 compile=False, method="fem", current=None):
+                 compile=False, method="fem", current=None, refine=None):
         if method not in ("fem", "fv"):
             raise ValueError("method must be 'fem' or 'fv'")
         current = current or ("flux" if method == "fem" else "power")
@@ -408,6 +408,11 @@ class GPURotationScan:
         t0 = time.time()
         self.method = method
         self.current = current
+        # refinement passes: the flux reads phi next to the top electrode with ~1e4 amplification,
+        # so it needs two float32 passes; the power current is quadratic in the error and needs one
+        self.refine = refine or (2 if current == "flux" and dtype != torch.float64 else 1)
+        self.iters = iters
+        self._inner = self._steps(iters)[0]
         self.compiled = compile
         self._iterate_fn = torch.compile(self._iterate, dynamic=False) if compile else self._iterate
         self.sem = sem = _NoMeshSEM.create(config)
@@ -471,7 +476,7 @@ class GPURotationScan:
         r0 = rhs(L, self.voltage) - apply(L, self.phi0.expand(L["D"].shape))
         Ls = {k: v.to(self.dtype) for k, v in L.items()}
         levels, factors = setup_hierarchy(Ls)
-        return L, levels, factors, r0.to(self.dtype)
+        return L, levels, factors, r0
 
     def positions(self, rotation_matrix):
         """Atom centres for one orientation, computed exactly as VerticalMovementSEM.run does."""
@@ -488,18 +493,36 @@ class GPURotationScan:
             out.append(torch.stack([sg.batch(pos) for sg in self.sigma], 1))
         return torch.cat(out).reshape(len(rotation_matrices), len(self.sigma), *self.grid.n)
 
-    def _iterate(self, levels, factors, r0):
-        psi, _ = pcg(levels, factors, r0, torch.zeros_like(r0), self.iters)
-        return psi
+    def _iterate(self, levels, factors, r):
+        d, _ = pcg(levels, factors, r, torch.zeros_like(r), self._inner)
+        return d
+
+    def _steps(self, iters):
+        """Iterations per refinement pass (the total is split as evenly as possible)."""
+        n = max(1, min(self.refine, iters))
+        return [iters // n + (1 if k < iters % n else 0) for k in range(n)]
 
     def solve(self, sig, iters=None, track=False):
+        """Mixed-precision iterative refinement: each pass runs CG in self.dtype on the float64
+        residual of the previous one, so the float32 rounding floor shrinks with the residual."""
         L, levels, factors, r0 = self._prepare(sig)
-        phi = lambda psi: self.phi0 + psi.to(torch.float64)
-        if iters is None and not track:
-            return self._current(L, phi(self._iterate_fn(levels, factors, r0))), None
-        psi, hist = pcg(levels, factors, r0, torch.zeros_like(r0), self.iters if iters is None else iters,
-                        lambda u: self._current(L, phi(u)), track)
-        return self._current(L, phi(psi)), hist
+        psi = torch.zeros_like(r0, dtype=torch.float64)
+        r, hist = r0, ([] if track else None)
+        steps = self._steps(self.iters if iters is None else iters)
+        for k, n in enumerate(steps):
+            rs = r.to(self.dtype)
+            if not track and n == self._inner:
+                d = self._iterate_fn(levels, factors, rs)
+            else:
+                base = psi
+                d, h = pcg(levels, factors, rs, torch.zeros_like(rs), n,
+                           lambda u: self._current(L, self.phi0 + base + u.to(torch.float64)), track)
+                if track:
+                    hist.extend(h if k == 0 else h[1:])
+            psi = psi + d.to(torch.float64)
+            if k < len(steps) - 1:
+                r = r0 - apply(L, psi)
+        return self._current(L, self.phi0 + psi), hist
 
     def run(self, rotation_matrices, batch_size=64):
         """Currents (nA) for each rotation matrix, in order."""
