@@ -234,7 +234,7 @@ def _run_rotation_scan_gpu(base_config: dict, rotations, args: argparse.Namespac
 
     dtype = torch.float64 if args.gpu_dtype == "float64" else torch.float32
     scan = GPURotationScan(base_config, device=args.gpu_device, dtype=dtype, iters=args.gpu_iters,
-                           compile=args.gpu_compile, method=args.gpu_method)
+                           compile=args.gpu_compile, method=args.gpu_method, current=args.gpu_current)
     logger.info("Open pore current: %.6e nA", scan.open_current)
     matrices = [rotation_matrix_from_spec(spec) for spec in rotations]
     currents = scan.run(matrices, batch_size=args.gpu_batch)
@@ -250,7 +250,7 @@ def _run_rotation_scan_gpu(base_config: dict, rotations, args: argparse.Namespac
     (output_dir / "open_pore_current.txt").write_text(f"{scan.open_current:.10e}\n")
     timing = dict(scan.timing, grid=list(scan.grid.n), iters=args.gpu_iters, batch=args.gpu_batch,
                   dtype=args.gpu_dtype, device=args.gpu_device, compiled=args.gpu_compile,
-                  method=args.gpu_method)
+                  method=args.gpu_method, current=scan.current)
     (output_dir / "gpu_timing.json").write_text(json.dumps(timing, indent=2))
     logger.info("GPU rotation scan: %d orientations, grid %s, timing %s", len(rows), scan.grid.n, scan.timing)
 
@@ -568,14 +568,17 @@ Pore Types:
                                  help='fem: DOLFINx solve per rotation (default); gpu: batched solve on a GPU')
     rotation_parser.add_argument('--gpu-batch', type=int, default=64,
                                  help='Orientations solved together on the GPU (default: 64)')
-    rotation_parser.add_argument('--gpu-iters', type=int, default=6,
-                                 help='Multigrid-preconditioned CG iterations per solve (default: 6)')
+    rotation_parser.add_argument('--gpu-iters', type=int, default=12,
+                                 help='Multigrid-preconditioned CG iterations per solve (default: 12)')
     rotation_parser.add_argument('--gpu-device', default='cuda', help='Torch device for the GPU backend (default: cuda)')
     rotation_parser.add_argument('--gpu-dtype', choices=['float32', 'float64'], default='float32',
                                  help='Precision of the GPU solve (default: float32)')
     rotation_parser.add_argument('--gpu-method', choices=['fem', 'fv'], default='fem',
                                  help='fem: the same P1 finite elements as the FEM backend (default); '
                                       'fv: cell-centred finite volumes (faster, different discretisation)')
+    rotation_parser.add_argument('--gpu-current', choices=['flux', 'power'], default=None,
+                                 help='flux: top-facet flux as the FEM backend reports it (fem default); '
+                                      'power: dissipated power / voltage (fv default)')
     rotation_parser.add_argument('--gpu-compile', action='store_true',
                                  help='Compile the GPU solve with torch.compile (faster after a one-off compile)')
     

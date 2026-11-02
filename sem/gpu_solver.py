@@ -398,12 +398,16 @@ class _NoMeshSEM:
 class GPURotationScan:
     """Batched rotation scan for one protein and one pore configuration."""
 
-    def __init__(self, config, device="cuda", dtype=torch.float32, iters=6, open_iters=60,
-                 compile=False, method="fem"):
+    def __init__(self, config, device="cuda", dtype=torch.float32, iters=12, open_iters=100,
+                 compile=False, method="fem", current=None):
         if method not in ("fem", "fv"):
             raise ValueError("method must be 'fem' or 'fv'")
+        current = current or ("flux" if method == "fem" else "power")
+        if current not in ("flux", "power") or (method == "fv" and current == "flux"):
+            raise ValueError("current must be 'flux' (fem only) or 'power'")
         t0 = time.time()
         self.method = method
+        self.current = current
         self.compiled = compile
         self._iterate_fn = torch.compile(self._iterate, dynamic=False) if compile else self._iterate
         self.sem = sem = _NoMeshSEM.create(config)
@@ -432,11 +436,13 @@ class GPURotationScan:
         self.z = float(sem.z_start + (num_steps - 1) * direction * sem.z_step)  # run() keeps the last z
         self.timing = {"prepare_s": time.time() - t0}
         t1 = time.time()
+        # open-pore solution in float64: every orientation is then solved for its change from phi0
         base = torch.as_tensor(np.stack(self.base_sigma), device=self.device)
-        levels, factors = setup_hierarchy(self._fine(base.reshape(1, len(offsets), *self.grid.n)))
-        b = rhs(levels[0], self.voltage)
+        L0 = self._fine(base.reshape(1, len(offsets), *self.grid.n))
+        levels, factors = setup_hierarchy(L0)
+        b = rhs(L0, self.voltage)
         self.phi0, _ = pcg(levels, factors, b, torch.zeros_like(b), open_iters)
-        self.open_current = float(self._current(levels[0], self.phi0)[0])
+        self.open_current = float(self._current(L0, self.phi0)[0])
         self._sync()
         self.timing["open_pore_s"] = time.time() - t1
 
@@ -445,14 +451,27 @@ class GPURotationScan:
             torch.cuda.synchronize()
 
     def _fine(self, sig):
-        """Finest level from conductivity (B, k, nx, ny, nz), k = 6 (fem) or 1 (fv)."""
-        sig = sig.to(self.dtype)
+        """Finest level, in float64, from conductivity (B, k, nx, ny, nz), k = 6 (fem) or 1 (fv)."""
+        sig = sig.to(torch.float64)
         return fem_level(sig, self.grid.h) if self.method == "fem" else fv_level(sig[:, 0], self.grid.h)
 
     def _current(self, L, x):
-        if self.method == "fem":
+        if self.current == "flux":
             return flux_current(L, x, self.voltage)
         return power_current(L, x, self.voltage)
+
+    def _prepare(self, sig):
+        """float64 operator and the residual of phi0; the solve hierarchy in self.dtype.
+
+        Solving A psi = b - A phi0 for psi = phi - phi0 keeps the float32 solve away from the
+        cancellation in (voltage - phi) next to the top electrode, where phi is within ~0.1 % of
+        the voltage; the current is then evaluated in float64 from phi0 + psi.
+        """
+        L = self._fine(sig)
+        r0 = rhs(L, self.voltage) - apply(L, self.phi0.expand(L["D"].shape))
+        Ls = {k: v.to(self.dtype) for k, v in L.items()}
+        levels, factors = setup_hierarchy(Ls)
+        return L, levels, factors, r0.to(self.dtype)
 
     def positions(self, rotation_matrix):
         """Atom centres for one orientation, computed exactly as VerticalMovementSEM.run does."""
@@ -469,19 +488,18 @@ class GPURotationScan:
             out.append(torch.stack([sg.batch(pos) for sg in self.sigma], 1))
         return torch.cat(out).reshape(len(rotation_matrices), len(self.sigma), *self.grid.n)
 
-    def _iterate(self, levels, factors, b):
-        x, _ = pcg(levels, factors, b, self.phi0.expand_as(b).clone(), self.iters)
-        return self._current(levels[0], x)
+    def _iterate(self, levels, factors, r0):
+        psi, _ = pcg(levels, factors, r0, torch.zeros_like(r0), self.iters)
+        return psi
 
     def solve(self, sig, iters=None, track=False):
-        levels, factors = setup_hierarchy(self._fine(sig))
-        b = rhs(levels[0], self.voltage)
+        L, levels, factors, r0 = self._prepare(sig)
+        phi = lambda psi: self.phi0 + psi.to(torch.float64)
         if iters is None and not track:
-            return self._iterate_fn(levels, factors, b), None
-        x0 = self.phi0.expand_as(b).clone()
-        x, hist = pcg(levels, factors, b, x0, self.iters if iters is None else iters,
-                      lambda u: self._current(levels[0], u), track)
-        return self._current(levels[0], x), hist
+            return self._current(L, phi(self._iterate_fn(levels, factors, r0))), None
+        psi, hist = pcg(levels, factors, r0, torch.zeros_like(r0), self.iters if iters is None else iters,
+                        lambda u: self._current(L, phi(u)), track)
+        return self._current(L, phi(psi)), hist
 
     def run(self, rotation_matrices, batch_size=64):
         """Currents (nA) for each rotation matrix, in order."""
