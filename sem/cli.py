@@ -107,6 +107,8 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
     # Optional parameters
     membrane_conductivity = sim.get("membrane_conductivity", 0.0001)
     cleanup_temp_files = sim.get("cleanup_temp_files", True)
+    # Atom-centre search radius for the analyte steric layer (A); 5.0 is the class default
+    cutoff = float(sim.get("cutoff", 5.0))
     
 
     # Movement parameters
@@ -176,6 +178,7 @@ def create_sem_from_config(config, prepare_analyte=True, *, gmsh_center_mode_ove
         charge_clip=charge_clip,
         default_radius=default_radius,
         membrane_conductivity=membrane_conductivity,
+        cutoff=cutoff,
         membrane_z_offset=membrane_z_offset,
         cleanup_temp_files=cleanup_temp_files,
         xy_margin=xy_margin,
