@@ -398,21 +398,24 @@ class _NoMeshSEM:
 class GPURotationScan:
     """Batched rotation scan for one protein and one pore configuration."""
 
-    def __init__(self, config, device="cuda", dtype=torch.float32, iters=12, open_iters=100,
-                 compile=False, method="fem", current=None, refine=None):
+    def __init__(self, config, device="cuda", dtype=None, iters=None, open_iters=100,
+                 compile=False, method="fem", current=None):
         if method not in ("fem", "fv"):
             raise ValueError("method must be 'fem' or 'fv'")
         current = current or ("flux" if method == "fem" else "power")
         if current not in ("flux", "power") or (method == "fv" and current == "flux"):
             raise ValueError("current must be 'flux' (fem only) or 'power'")
+        # The flux reads phi next to the top electrode, where it is within ~0.1 % of the voltage,
+        # so its error is ~1e4 times the potential error there: it needs a float64 solve (14
+        # iterations: <= 2e-4 blockade points on the test set). The power current is quadratic
+        # in the error and reaches <= 1e-3 points in float32 within 8 iterations.
+        if dtype is None:
+            dtype = torch.float64 if current == "flux" else torch.float32
+        if iters is None:
+            iters = 14 if current == "flux" else 8
         t0 = time.time()
         self.method = method
         self.current = current
-        # refinement passes: the flux reads phi next to the top electrode with ~1e4 amplification,
-        # so it needs two float32 passes; the power current is quadratic in the error and needs one
-        self.refine = refine or (2 if current == "flux" and dtype != torch.float64 else 1)
-        self.iters = iters
-        self._inner = self._steps(iters)[0]
         self.compiled = compile
         self._iterate_fn = torch.compile(self._iterate, dynamic=False) if compile else self._iterate
         self.sem = sem = _NoMeshSEM.create(config)
@@ -494,35 +497,19 @@ class GPURotationScan:
         return torch.cat(out).reshape(len(rotation_matrices), len(self.sigma), *self.grid.n)
 
     def _iterate(self, levels, factors, r):
-        d, _ = pcg(levels, factors, r, torch.zeros_like(r), self._inner)
-        return d
-
-    def _steps(self, iters):
-        """Iterations per refinement pass (the total is split as evenly as possible)."""
-        n = max(1, min(self.refine, iters))
-        return [iters // n + (1 if k < iters % n else 0) for k in range(n)]
+        psi, _ = pcg(levels, factors, r, torch.zeros_like(r), self.iters)
+        return psi
 
     def solve(self, sig, iters=None, track=False):
-        """Mixed-precision iterative refinement: each pass runs CG in self.dtype on the float64
-        residual of the previous one, so the float32 rounding floor shrinks with the residual."""
+        """CG in self.dtype for psi = phi - phi0; the current is evaluated in float64 from phi0 + psi."""
         L, levels, factors, r0 = self._prepare(sig)
-        psi = torch.zeros_like(r0, dtype=torch.float64)
-        r, hist = r0, ([] if track else None)
-        steps = self._steps(self.iters if iters is None else iters)
-        for k, n in enumerate(steps):
-            rs = r.to(self.dtype)
-            if not track and n == self._inner:
-                d = self._iterate_fn(levels, factors, rs)
-            else:
-                base = psi
-                d, h = pcg(levels, factors, rs, torch.zeros_like(rs), n,
-                           lambda u: self._current(L, self.phi0 + base + u.to(torch.float64)), track)
-                if track:
-                    hist.extend(h if k == 0 else h[1:])
-            psi = psi + d.to(torch.float64)
-            if k < len(steps) - 1:
-                r = r0 - apply(L, psi)
-        return self._current(L, self.phi0 + psi), hist
+        r = r0.to(self.dtype)
+        phi = lambda u: self.phi0 + u.to(torch.float64)
+        if iters is None and not track:
+            return self._current(L, phi(self._iterate_fn(levels, factors, r))), None
+        psi, hist = pcg(levels, factors, r, torch.zeros_like(r), self.iters if iters is None else iters,
+                        lambda u: self._current(L, phi(u)), track)
+        return self._current(L, phi(psi)), hist
 
     def run(self, rotation_matrices, batch_size=64):
         """Currents (nA) for each rotation matrix, in order."""
