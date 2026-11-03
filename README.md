@@ -159,9 +159,17 @@ environment's `lib` folder first: `export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_
 worst, and the open-pore current to 2e-7. `tests/test_gpu_solver.py` checks the stencil against an
 element-by-element assembly, the potential interpolation, and the conductivity rule.
 
-**Speed.** On one A100 (batch 64, compiled, flux current) a 12 nm box takes 15 ms per orientation
-at 1 Å, 5 ms at 1.5 Å and 2.8 ms at 2 Å; the DOLFINx backend takes about 30-60 s and 3.5-7 s per
-orientation at 1 Å and 2 Å on one core.
+**Speed and memory** (12 nm box, one A100, batch 64; the DOLFINx backend as one process):
+
+| grid | DOLFINx | GPU, flux | GPU, flux, compiled | GPU memory (batch 64 / 16) | host RAM, DOLFINx / GPU |
+|---|---|---|---|---|---|
+| 1 Å | 28.4 s | 55 ms (520x) | 15 ms (1,900x) | 21 GB / 5.4 GB | 5.7 GB / 1.6 GB |
+| 1.5 Å | 8.3 s | 17 ms (480x) | 5.2 ms (1,600x) | 6.2 GB / 1.6 GB | 1.9 GB / 1.5 GB |
+| 2 Å | 2.8 s | 7.9 ms (350x) | 2.8 ms (1,000x) | 2.6 GB / 0.7 GB | 1.0 GB / 1.4 GB |
+
+Times are per orientation. GPU memory is the PyTorch peak allocation (the caching allocator reserves about
+1.6 times more) and grows about linearly with `--gpu-batch`; batch 16 is within 5 % of batch 64's speed
+at 1 Å. One orientation at a time (batch 1) takes 80-135 ms, because kernel launches dominate.
 
 **Benchmark.** `sem/scripts/benchmark_gpu.py` runs `open_pore`, `run` and `rotation_scan` on both
 backends through the CLI and compares the outputs (default workload: `petk/Demo/config.json`):
