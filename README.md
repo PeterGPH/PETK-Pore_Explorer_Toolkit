@@ -171,6 +171,19 @@ python -m sem.scripts.benchmark_gpu --out gpu_benchmark               # demo gri
 python -m sem.scripts.benchmark_gpu --grid 2.5 --out gpu_benchmark_2p5
 ```
 
+Reference output (one A100; the DOLFINx backend as one process on the same node; wall-clock
+times including process start-up; 1AOI nucleosome, 30 nm box):
+
+| grid | mode | cases | DOLFINx | GPU | speed-up | max abs(d blockade) |
+|---|---|---|---|---|---|---|
+| 5 Å (demo) | `run` (z scan) | 23 | 103 s | 7.5 s | 14x | 0.001 points |
+| 5 Å (demo) | `rotation_scan` | 16 | 75 s | 7.5 s | 10x | 0.0006 points |
+| 2.5 Å | `run` (z scan) | 23 | 930 s | 10.2 s | 91x | 0.006 points |
+| 2.5 Å | `rotation_scan` | 16 | 650 s | 9.9 s | 66x | 0.005 points |
+
+Most of the GPU time here is start-up and setup (about 7 s), so the speed-up grows with the grid
+size and with the number of z positions or orientations.
+
 **Not supported on the GPU:** gmsh meshes (`mesh_engine: gmsh`), `use_charges`, MPI (run one
 process per GPU), and ARBD grids from `rotation_scan` (use `run` for one orientation). The GPU
 backend applies `prevent_analyte_overlap` exactly as the FEM backend does.
