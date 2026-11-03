@@ -388,7 +388,7 @@ class AnalyteSigma:
             return sig
         overlap = torch.zeros(B, dtype=torch.bool, device=self.device)
         if self.membrane is not None:
-            bad = (s <= self.min_distance) & (base_hit <= self.membrane)
+            bad = (s <= self.min_distance) & (base_hit <= self.membrane * (1.0 + 1e-9))  # as the FEM check
             which = torch.nonzero(hit).squeeze(1)[bad] // ncell
             overlap[which] = True
         return sig, overlap
@@ -495,7 +495,10 @@ class GPUSolver:
         self.base_sigma = []
         self.sigma = []
         has_analyte = prepare_analyte and len(sem.moving_radii) > 0
-        membrane = sem.membrane_conductivity if sem.prevent_analyte_overlap else None
+        # the FEM check's threshold: the pore's own membrane conductivity (VerticalMovementSEM
+        # sets membrane_overlap_conductivity; older versions compared with membrane_conductivity)
+        membrane = (getattr(sem, "membrane_overlap_conductivity", sem.membrane_conductivity)
+                    if sem.prevent_analyte_overlap else None)
         for off in offsets:
             base = np.asarray(sem.base_cond_interp(self.grid.points(off)), dtype=np.float64)
             base[np.isnan(base)] = sem.bulk_conductivity          # as utils.loadFunc
