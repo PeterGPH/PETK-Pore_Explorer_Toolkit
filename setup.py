@@ -55,6 +55,10 @@ extras_require = {
         "openmm>=8.0.0",
         "pdb2pqr>=3.0.0",
     ],
+    # --backend gpu (install the CUDA build that matches the GPU, e.g. cu128 for Blackwell)
+    "gpu": [
+        "torch>=2.4",
+    ],
     "fem": [
         "mpi4py>=3.1.0",
         "petsc4py>=3.18.0",
