@@ -645,7 +645,15 @@ class VerticalMovementSEM:
         self.base_cond_interp = self.pore_obj.get_conductivity_interpolator()
         self.base_phi_interp = self.pore_obj.get_phi_interpolator()
         self.base_dist_interp = self.pore_obj.get_distance_interpolator()
-        
+        # The hard-core overlap check flags base conductivity at the membrane's own level. Pores
+        # built from a distance field put that level above membrane_conductivity (condfrac's
+        # floor), so take it from the pore; never go below membrane_conductivity.
+        pore_membrane = self.pore_obj.get_membrane_conductivity()
+        self.membrane_overlap_conductivity = (
+            self.membrane_conductivity if pore_membrane is None
+            else max(self.membrane_conductivity, pore_membrane)
+        )
+
         if self.pore_type == "bin_file":
             self.bin_dimensions = self.pore_obj.get_dimensions()
             self.bin_grid_shape = self.pore_obj.get_grid_shape()
@@ -1290,7 +1298,9 @@ class VerticalMovementSEM:
                 hard_core_mask = distances[valid_mask] <= min_distance
                 if np.any(hard_core_mask):
                     base_vals = base_conductivity[valid_mask]
-                    membrane_mask = base_vals <= self.membrane_conductivity
+                    # relative tolerance: interpolating equal grid values can land one ulp above
+                    threshold = getattr(self, "membrane_overlap_conductivity", self.membrane_conductivity)
+                    membrane_mask = base_vals <= threshold * (1.0 + 1e-9)
                     overlap_mask = hard_core_mask & membrane_mask
                     if np.any(overlap_mask):
                         valid_idx = np.flatnonzero(valid_mask)

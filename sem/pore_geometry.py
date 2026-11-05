@@ -59,7 +59,20 @@ class BasePore(ABC):
     def get_distance_interpolator(self):
         """Return a distance interpolator if available, else None."""
         return None
-    
+
+    def get_membrane_conductivity(self):
+        """Conductivity this pore assigns inside its membrane material, or None if unknown.
+
+        Pores built from a distance field map distance 0 (and anything within condfrac's 1.3 A
+        hard core) through _conductivity_from_distance, whose floor is
+        membrane + 1e-7 * (bulk - membrane), not membrane_conductivity itself.
+        """
+        bulk = getattr(self, "bulk_conductivity", None)
+        membrane = getattr(self, "membrane_conductivity", None)
+        if bulk is None or membrane is None:
+            return None
+        return float(_conductivity_from_distance(np.zeros(1), bulk, membrane)[0])
+
     def get_dimensions(self):
         """Return [Lm, Wm, Hm] or None if not applicable."""
         return None
@@ -426,6 +439,13 @@ class BinFilePore(BasePore):
 
     def get_distance_interpolator(self):
         return self.distance_interp
+
+    def get_membrane_conductivity(self):
+        """A distance map gives base_sigma * condfrac(0) inside the material; a conductivity map
+        has no known membrane value."""
+        if self.data_units == "distance":
+            return float(self.base_sigma * condfrac(np.zeros(1))[0])
+        return None
 
 class BiologicalPore(BasePore):
     def __init__(self, X, Y, Z, pore_pdb, membrane_half_thickness, 
