@@ -6,9 +6,6 @@ Contains helper functions converted to DOLFINx.
 import os
 import numpy as np
 import logging
-import dolfinx
-import dolfinx.fem as fem
-import dolfinx.mesh as dmesh
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +145,10 @@ def get_dof_coordinates(mesh_obj, V):
     """
     if not _is_dg0_space(V):
         return V.tabulate_dof_coordinates()
+
+    # Import locally so the module (condfrac, readbinGrid) stays importable
+    # without dolfinx, e.g. for pore_geometry in CI's pip-only job.
+    import dolfinx.mesh as dmesh
 
     tdim = mesh_obj.topology.dim
     cell_map = mesh_obj.topology.index_map(tdim)
